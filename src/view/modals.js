@@ -469,11 +469,11 @@ const VIEWS = {
     // One face, one worker. While someone has it, there is nothing to offer —
     // stand them down above and the choices come back.
     if (!already.length) {
-      // Ground still shut over whatever is under it. This used to be a second
-      // table with a row per worker and "clear the tile first" written against
-      // every one of them — a grid of refusals saying one thing. It is one
-      // thing, so it is said once, and the picture says the rest.
-      if (t && t.feature && !t.featureWorked && isClearable(state, t)) h += buriedNote(t);
+      // Whatever the tile is holding, shut or open, said once and drawn once.
+      // Shut, this replaces what used to be a second table with a row per worker
+      // and "clear the tile first" written against every one of them — a grid of
+      // refusals saying a single thing that was not about any of the workers.
+      if (t && t.feature && !t.featureWorked) h += featureNote(state, t);
 
       // Who can be sent, how far they walk, when the work starts, and what they
       // can actually do here. One table: the choice is which body, and every
@@ -743,20 +743,30 @@ function tileJobs(state, t, at) {
 }
 
 /**
- * What lies under ground that is still shut, as prose and a picture.
+ * What the tile is holding, as prose and a picture.
  *
- * The picture is the reel's own, which is the point: the same chest you will be
- * shown being dug up is the one you are being told is down there.
+ * The picture is the reel's own, which is the point: the chest you are told is
+ * down there is the chest you will be shown being dug up. It is drawn whether
+ * the ground is shut or open — a site you are about to work is the one moment
+ * you most want to see what it is, and the row of buttons only names it.
+ *
+ * The prose is what changes. Shut, it says the ground has to come off first;
+ * open, it says what the work is worth and what it costs.
  */
-function buriedNote(t) {
+function featureNote(state, t) {
   const kind = t.feature;
   const prize = featurePrize(kind);
   const action = C.featureAction(kind);
-  const what = `There is a ${featureWord(kind)} under this ground`
-    + (prize ? ` — ${prize}` : '') + '.';
-  const then = action
-    ? `Cut the tile first. Working it is a turn of its own after that, and one worker does both.`
-    : `Cut the tile first. It is held rather than worked: a body standing on it raises the hand cap by ${C.FEATURES.spring.handsCap}, and only while they stand there.`;
+  const shut = isClearable(state, t);
+  const held = `It is held rather than worked: a body standing on it raises the hand cap by ${C.FEATURES.spring.handsCap}, and only for as long as they stand there.`;
+
+  const where = (shut ? BURIED_PHRASE : OPEN_PHRASE)[kind]
+    || (shut ? `A ${featureWord(kind)} lies under this standing ground` : `The ${featureWord(kind)} is in the open`);
+  const what = `${where}${prize ? ` — ${prize}` : ''}.`;
+  const then = shut
+    ? `Cut the tile first. ${action ? 'Working it is a turn of its own after that, and one worker does both.' : held}`
+    : (action ? "One turn's work for whoever goes." : held);
+
   return `<pre class="art">${esc(art.forFeature(kind))}</pre>`
     + `<p class="note">${esc(what)} ${esc(then)}</p>`;
 }
@@ -779,6 +789,22 @@ function walkCells(state, w, to) {
       : `after ${walk.turns} turn${walk.turns === 1 ? '' : 's'} walking`,
   };
 }
+
+// Where the thing is, in its own words. One phrase per site rather than one
+// sentence with the word swapped in: a chest is buried, a castaway is not, and
+// "there is a castaway under this ground" is a sentence about a grave.
+const BURIED_PHRASE = {
+  wreck: 'A wreck lies under this standing ground',
+  cache: 'A chest lies buried under this standing ground',
+  officer: 'A castaway is somewhere in this standing ground',
+  spring: 'A spring rises under this standing ground',
+};
+const OPEN_PHRASE = {
+  wreck: 'The wreck lies open to the sky',
+  cache: 'The chest lies open to the sky',
+  officer: 'The castaway is in the open',
+  spring: 'The spring runs in the open',
+};
 
 const FEATURE_WORD = { cache: 'chest', wreck: 'wreck', officer: 'castaway', spring: 'spring' };
 const featureWord = (kind) => FEATURE_WORD[kind] || kind;
