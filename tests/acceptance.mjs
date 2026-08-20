@@ -305,7 +305,7 @@ runSection('3.3', () => {
     const s = St.createState(20260816);
     const wood = (terr) => C.TERRAIN[terr].yield.wood;
     const canopyOver = wood('canopy') / wood('forest') - 1;
-    t('canopy pays about 30% more wood than forest', Math.abs(canopyOver - 0.30) <= 0.05,
+    t('canopy pays about 10% more wood than forest', Math.abs(canopyOver - 0.10) <= 0.05,
       `${wood('forest')} -> ${wood('canopy')} wood, +${Math.round(canopyOver * 100)}%`);
     t('scrub is one turn of work, for a third of forest\'s wood',
       C.turnsToClear('scrub') === 1 && Math.abs(wood('scrub') / wood('forest') - 1 / 3) < 0.01,
@@ -323,6 +323,48 @@ runSection('3.3', () => {
     }
     t('a hand cuts a scrub tile in a single turn', cutOn === 1,
       scrub ? `cut on turn ${cutOn}` : 'no scrub on the landing frontier');
+
+    // The meadow: open ground both sides can cross and neither can work. The
+    // point of the table entry is that it behaves like ground, not like a
+    // decoration, so each half of that is asked of the live rules rather than
+    // read back out of the config it came from.
+    const md = C.TERRAIN.meadow;
+    t('a meadow is open ground with nothing in it to cut',
+      !md.clearable && !Object.keys(md.yield).length && C.WORK_OPEN_TERRAIN.includes('meadow'),
+      `clearable ${md.clearable}, yield ${JSON.stringify(md.yield)}`);
+    t('both sides cross a meadow — crew, the march, and a swarm in contact',
+      md.passable && md.assaultPassable,
+      `advance ${md.advance}x, against sand ${C.TERRAIN.sand.advance}x and salt ${C.TERRAIN.salt.advance}x`);
+
+    const meadowTile = [...s.map.tiles.values()].find((x) => x.terrain === 'meadow' && !x.occupant && !x.feature);
+    t('the generator lays meadow, and a hand may stand on it uncut',
+      !!meadowTile && St.isOpenGround(meadowTile) && !St.isClearable(s, meadowTile),
+      meadowTile ? `(${meadowTile.q},${meadowTile.r})` : 'no meadow on the island');
+
+    // The one piece of ground on the island that takes a structure as it lies.
+    // Everything else buildable has to be cut first, which is the cost the
+    // meadow does not charge — so the rule is asked of the ground beside it too,
+    // to be sure what changed is the meadow and not the check.
+    const virginForest = [...s.map.tiles.values()].find((x) => x.terrain === 'forest' && !x.cleared && !x.occupant);
+    const anySand = [...s.map.tiles.values()].find((x) => x.terrain === 'sand' && !x.occupant);
+    t('a meadow is built on uncut, and it is the only ground that is',
+      !!meadowTile && St.isBuildable(s, meadowTile) && !meadowTile.cleared
+      && !St.isBuildable(s, virginForest) && !St.isBuildable(s, anySand),
+      `meadow ${St.isBuildable(s, meadowTile)}, virgin forest ${St.isBuildable(s, virginForest)}, sand ${St.isBuildable(s, anySand)}`);
+
+    // And building on one does not lay road, so a tower in a meadow gives a
+    // cohort no new way in — the entry rule is about road joined to the ship.
+    t('a meadow never becomes road, however it is used',
+      !!meadowTile && !St.isRoad(meadowTile) && C.CLEARED_BECOMES === 'road' && !C.TERRAIN.meadow.clearable,
+      `isRoad ${St.isRoad(meadowTile)}`);
+
+    // Its share is taken out of the other open ground, so the island still has
+    // the same wood and stone in it — which is the whole reason it was safe to
+    // add a terrain to a tuned mix.
+    const openMix = ['sand', 'salt', 'meadow'].reduce((a, k) => a + C.TERRAIN_MIX[k], 0);
+    t('the meadow is paid for out of sand and salt, not out of the clearable ground',
+      Math.abs(openMix - 7) < 1e-9 && ['sand', 'salt', 'meadow'].every((k) => !C.TERRAIN[k].clearable),
+      `sand ${C.TERRAIN_MIX.sand} + meadow ${C.TERRAIN_MIX.meadow} + salt ${C.TERRAIN_MIX.salt} = ${openMix} points`);
   }
   {
     // The invariant behind all of it: at the start of a phase, everything the

@@ -57,10 +57,11 @@ const C = {
   // implies, `C.enemySpeed`, so tar reads 0.20x: five times slower.
   TERRAIN: {
     forest: { clearable: true, yield: { wood: 9 }, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: false },
-    // Old timber: a third more wood than forest for the same three turns, which is
-    // what makes felling the canopy worth doing for its own sake and not only
-    // to lift the shadow it casts over everything behind it.
-    canopy: { clearable: true, yield: { wood: 12 }, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: true },
+    // Old timber: a tenth more wood than forest for the same three turns. The
+    // margin is deliberately thin — felling a canopy stand is worth doing for
+    // the shadow it lifts off everything behind it, and the extra wood is a
+    // sweetener rather than the reason.
+    canopy: { clearable: true, yield: { wood: 10 }, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: true },
     // Scrub is thin enough to march through on the way in, but a swarm at full
     // tilt will not push into it — the charge keeps to open ground.
     //
@@ -76,6 +77,21 @@ const C = {
     iron: { clearable: true, yield: { iron: 10 }, buildable: true, passable: false, assaultPassable: false, advance: 2.0, targetableVirgin: true, blocksSight: false },
     road: { clearable: false, yield: {}, buildable: true, passable: true, assaultPassable: true, advance: 1.0, targetableVirgin: true, blocksSight: false },
     sand: { clearable: false, yield: {}, buildable: false, passable: true, assaultPassable: true, advance: 2.0, targetableVirgin: true, blocksSight: false },
+    // Open grass. Nothing to cut and nothing under it, so it is walked rather
+    // than worked — by the crew as well as by the enemy, which is what sets it
+    // apart from scrub: a swarm at full tilt will cross a meadow and will not
+    // push into thin wood. Easier going than sand, harder than a salt pan.
+    //
+    // It exists to break up open ground. Sand and salt were the whole of it and
+    // both read as pale, so a coast-to-coast walk was one colour; the meadow's
+    // share is taken out of theirs rather than off the clearable ground, which
+    // leaves the wood and stone on the island exactly where they were.
+    //
+    // Buildable, and the only ground on the island that is buildable without
+    // first being cut. That makes a meadow worth finding: a tower goes up on
+    // one for nothing, and because it never becomes road, a tower standing in
+    // one adds no entry for a cohort to arrive down either.
+    meadow: { clearable: false, yield: {}, buildable: true, passable: true, assaultPassable: true, advance: 1.5, targetableVirgin: true, blocksSight: false },
     salt: { clearable: false, yield: {}, buildable: false, passable: true, assaultPassable: true, advance: 1.0, targetableVirgin: true, blocksSight: false },
     freshwater: { clearable: false, yield: {}, buildable: false, passable: false, assaultPassable: false, advance: 6.0, targetableVirgin: true, blocksSight: false },
     cliff: { clearable: false, yield: {}, buildable: 'towers', passable: false, assaultPassable: false, advance: 6.0, targetableVirgin: true, blocksSight: false },
@@ -94,13 +110,19 @@ const C = {
   TERRAIN_COLOUR: {
     forest: '#2f5d3a', canopy: '#1e4029', scrub: '#6d7a48', stone: '#7a7a72',
     road: '#b9a582', sand: '#d9c48f', salt: '#e8e6dd', freshwater: '#3c6d8f', iron: '#8c6a55',
+    meadow: '#9aad5e',
     cliff: '#5a5048', saltwater: '#25506e', tar: '#241f1c',
   },
   // 02-map.md §3.5 — target mix in points, over land tiles
   // iron is carved out of forest and scrub: rare, and never near enough
+  // The meadow's 2.5 points come out of sand's 6 and salt's 1 and nowhere else,
+  // so the clearable share of the island — and with it every wood and stone
+  // number in the economy — is exactly what it was. Salt halves rather than
+  // vanishes: it is the one ground a cohort crosses at road speed, and that is
+  // worth keeping rare rather than losing.
   TERRAIN_MIX: {
     forest: 40, canopy: 2, scrub: 23, stone: 10, iron: 2, road: 3,
-    sand: 6, salt: 1, freshwater: 8, cliff: 4,
+    sand: 4, meadow: 2.5, salt: 0.5, freshwater: 8, cliff: 4,
   },
   MIX_TOLERANCE: 2,
   // Generation lays no road at all: every road tile on a live map is ground the
@@ -156,7 +178,9 @@ const C = {
   // and nothing else — the rest of the coast is ground you cut your way into.
   // No road will ever run over sand either, so a beach walk never becomes a
   // supply line, and an assault still needs a real road.
-  WORK_OPEN_TERRAIN: ['road', 'sand', 'salt'],
+  // The meadow is here for the same reason the beach is: there is nothing on it
+  // to cut, so a chest lying in one has to be reachable without cutting.
+  WORK_OPEN_TERRAIN: ['road', 'sand', 'salt', 'meadow'],
   BRIDGE_COST_WOOD: 65,
   CLEARED_BECOMES: 'road',
 

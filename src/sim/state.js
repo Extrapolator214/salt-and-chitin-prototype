@@ -196,8 +196,11 @@ export function isBuildable(state, tile, forTower = false) {
   const def = C.TERRAIN[tile.terrain];
   if (def.buildable === 'towers') return forTower;
   if (!def.buildable) return false;
-  // virgin ground must be cleared first; road and bridges are already clear
-  return tile.cleared;
+  // Virgin ground must be cut open first — but only ground that has something
+  // on it to cut. A meadow is already open and can never be cleared, so asking
+  // for `cleared` on one is asking for a state it can never reach: it is built
+  // on as it stands, which is the whole of what a natural clearing is worth.
+  return tile.cleared || (!def.clearable && isOpenGround(tile));
 }
 
 /** Line of sight: canopy blocks fire over itself. Endpoints do not block. */

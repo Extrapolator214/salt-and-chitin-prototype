@@ -588,7 +588,11 @@ function attempt(seed, attemptNo) {
   // ---- 3.5 Terrain fill ---------------------------------------------------
   const unassigned = [...tiles.values()].filter((t) => t.terrain === null).sort((a, b) => a.noise - b.noise);
   const have = placed();
-  const fillOrder = ['salt', 'sand', 'scrub', 'forest', 'canopy'];
+  // Ordered along the same gradient the sort above puts the tiles in: the
+  // driest, flattest ground first and the deepest wood last. The meadow sits
+  // between the sand and the scrub, which is what makes it come out in patches
+  // rather than scattered — neighbouring noise values are neighbouring ground.
+  const fillOrder = ['salt', 'sand', 'meadow', 'scrub', 'forest', 'canopy'];
   const want = fillOrder.map((terr) => Math.max(0, quota[terr] - (have[terr] || 0)));
   const wantTotal = want.reduce((a, b) => a + b, 0);
   want[fillOrder.indexOf('forest')] += unassigned.length - wantTotal;
@@ -632,8 +636,9 @@ function attempt(seed, attemptNo) {
   }
 
   // ---- the ship's road exits ----------------------------------------------
-  // The fill can drop sand or salt against the ship's side, and neither can
-  // ever be cut, so a landing can end up with no ground to start a road on.
+  // The fill can drop sand, salt or meadow against the ship's side, and none of
+  // the three can ever be cut, so a landing can end up with no ground to start
+  // a road on.
   // Whatever is left there is turned back into scrub — thin ground, three turns
   // of work like any other, but ground a road can begin on.
   {

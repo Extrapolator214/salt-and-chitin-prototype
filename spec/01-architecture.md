@@ -84,8 +84,9 @@ state = {
 ```js
 Tile = {
   q, r,
-  terrain,            // 'forest' | 'canopy' | 'scrub' | 'stone' | 'road' |
-                      // 'sand' | 'salt' | 'freshwater' | 'cliff' | 'saltwater'
+  terrain,            // 'forest' | 'canopy' | 'scrub' | 'stone' | 'iron' | 'road' |
+                      // 'sand' | 'meadow' | 'salt' | 'freshwater' | 'cliff' |
+                      // 'saltwater' | 'tar'
   cleared: false,     // once true, terrain becomes 'road'
   feature: null,      // 'cache' | 'spring' | 'officer' | 'wreck'
   featureWorked: false,

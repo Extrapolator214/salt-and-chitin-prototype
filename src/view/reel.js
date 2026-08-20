@@ -19,15 +19,21 @@ import { findPath } from '../sim/enemy.js';
 import { axialToPixel } from '../sim/hex.js';
 import * as art from './ascii.js';
 
-// Seconds at 1x. The walk is the only beat anyone actually reads — the rest are
-// glances, and a glance that outstays its welcome 300 times a run is the thing
-// most likely to make somebody turn the whole feature off.
+// Seconds at 1x.
+//
+// The walk is paced by how far anybody actually went. The splashes are paced to
+// be read: a picture and two numbers take longer to take in than they take to
+// draw, and at the couple of seconds they first held, the panes registered as a
+// flicker rather than as something you had been told. They are held about five
+// times as long now. Nothing about that is load bearing — the reel's own 1x/3x
+// and its skip are what a player in a hurry reaches for, and Space cuts a
+// single pane without giving up the rest.
 const WALK_MIN = 1.1;
 const WALK_PER_STEP = 0.22;
 const WALK_MAX = 4.0;
-const POI_SECONDS = 2.2;
-const BREED_SECONDS = 0.9;
-const RELEASE_SECONDS = 2.4;
+const POI_SECONDS = 11;
+const BREED_SECONDS = 4.5;
+const RELEASE_SECONDS = 12;
 
 // How hard the camera is pulled to the beat's subject. Exponential smoothing,
 // so it is framerate independent — a dropped frame moves it further, not less.

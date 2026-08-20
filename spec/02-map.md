@@ -96,9 +96,12 @@ Run before the noise fill.
 Layered value noise (3 octaves, seeded) over every unassigned land tile, with
 thresholds tuned so the realised mix lands within **±2 points** of:
 
-| forest | canopy | scrub | stone | road | sand | salt | freshwater | cliff |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **42** | 2 | 24 | 10 | 3 | 6 | 1 | 8 | 4 |
+| forest | canopy | scrub | stone | iron | road | sand | meadow | salt | freshwater | cliff |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **40** | 2 | 23 | 10 | 2 | 3 | 4 | 2.5 | 0.5 | 8 | 4 |
+
+The meadow's points come out of sand's and salt's and nowhere else, so the
+clearable share of the island is unchanged by it — see `TERRAIN_MIX`.
 
 Implementation: assign each tile a noise value, sort tiles by value, and cut the
 sorted list at the cumulative percentages. This hits the mix exactly and clusters

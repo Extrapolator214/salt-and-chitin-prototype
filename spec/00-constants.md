@@ -49,11 +49,12 @@ terrains are not simply tripled, and both are noted in the table.
 | terrain | clearable | yield | buildable | passable | advance mult | targetable while virgin | notes |
 |---|---|---|---|---|---:|---|---|
 | `forest` | yes | 3 wood | yes | yes | 3.0 | **no** | build: 9 wood, 3 turns |
-| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **12 wood**, 3 turns — 30% more than forest |
+| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **10 wood**, 3 turns — 10% more than forest |
 | `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: 3 wood, **1 turn** — a third of the wood for a third of the work |
 | `stone` | yes | 5 stone | yes | **no until cleared** | — | — | boulders span 3–5 tiles |
 | `road` | already clear | 0 | yes | yes | 1.0 | yes | what every cleared tile becomes |
 | `sand` | **no** | 0 | **no** | yes | 2.0 | yes | |
+| `meadow` | **no** | 0 | **yes, uncut** | yes | 1.5 | yes | open grass — crew walk it uncut, and a swarm in contact crosses it. The only ground built on without clearing first, and it never becomes road |
 | `salt` | **no** | 0 | **no** | yes | 1.0 | yes | +25% damage taken, no regeneration |
 | `freshwater` | bridgeable | 0 | no | **no** | — | — | shown as *fresh water*; bridge costs 65 wood |
 | `cliff` | **no** | 0 | **towers only** | **no** | — | — | +1 tower range |
