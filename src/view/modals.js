@@ -84,6 +84,18 @@ const row = (cells, off, why) =>
   `<tr class="${off ? 'off' : ''}">${cells.map((c) => `<td>${c}</td>`).join('')}` +
   `<td>${why ? `<span class="why">${esc(why)}</span>` : ''}</td></tr>`;
 
+/**
+ * "Where is this one standing?" — the question a list of names cannot answer.
+ *
+ * It points at the body, not at the job: the job's tile is already written in
+ * the row beside it, and a worker three turns into a march across the island is
+ * nowhere near the tile the row names.
+ */
+const locateBtn = (state, who) => {
+  const m = memberById(state, who);
+  return m && m.q !== undefined ? btn('locate', 'locate', { q: m.q, r: m.r }) : '';
+};
+
 const btn = (label, action, arg, disabled) =>
   `<button data-x="${action}" data-arg='${esc(JSON.stringify(arg || {}))}'${disabled ? ' disabled' : ''}>${label}</button>`;
 
@@ -338,7 +350,7 @@ const VIEWS = {
         : a.kind === 'assault' ? ''
           : btn('Idle', 'order', { type: 'reassign', assignmentId: a.id, kind: 'idle' });
       h += `<tr class="${a.queued ? 'queued' : ''}"><td>${who}</td><td>${a.kind}</td>` +
-        `<td>${target}</td><td>${when}</td><td>${stop}</td></tr>`;
+        `<td>${target}</td><td>${when}</td><td>${stop} ${locateBtn(state, a.who)}</td></tr>`;
     }
     // everyone else is standing about somewhere, which is where their next walk
     // is measured from
@@ -348,7 +360,7 @@ const VIEWS = {
       const officer = officerById(state, m.id);
       h += row([officer ? `<b>${esc(m.name)}</b>` : esc(m.name), 'idle',
         officer ? `<span class="note">${esc(officer.verb)}</span>` : `standing at (${m.q},${m.r})`,
-        'free', '']);
+        'free', locateBtn(state, m.id)]);
     }
     h += '</table>';
     h += '<p class="note">To put someone to work: shift-click a tile to clear it, or open a tower or building and man it. ' +
@@ -793,6 +805,7 @@ const ACTIONS = {
   orderClose(state, payload, ui) { ui.order(payload); close(ui); },
   revoke(state, payload, ui) { ui.revoke(payload.id); ui.refresh(); },
   place(state, payload, ui) { ui.place(payload.building); close(ui); },
+  locate(state, payload, ui) { close(ui); ui.locate(payload); },
   newRun(state, payload, ui) { open('newRun', {}, ui); },
   rollSeed(state, payload, ui) {
     open('newRun', { seed: 1 + Math.floor(Math.random() * 2147483646) }, ui);

@@ -326,6 +326,32 @@ function drawStructures(ctx, state, cam, canvas, S) {
 
 // ---- spawners and cohorts ---------------------------------------------------
 
+/**
+ * The tile "locate" pointed at, marked until the next click.
+ *
+ * Deliberately not the hover outline: that one is thin and white and follows
+ * the mouse, so a mark drawn the same way would be lost the moment the pointer
+ * moved and unreadable if it happened to sit still. Amber, heavier, and doubled
+ * with a ring outside the hex, which reads as a pin rather than as a cursor.
+ */
+function drawLocated(ctx, cam, canvas, S, ui) {
+  const at = ui && ui.located;
+  if (!at) return;
+  const p = axialToScreen(cam, canvas, at.q, at.r);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(240, 190, 90, 0.95)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  hexPath(ctx, p.x, p.y, S);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(240, 190, 90, 0.45)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, S * 1.45, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawSpawners(ctx, state, cam, canvas, S) {
   for (const sp of state.spawners) {
     if (!sp.alive) continue;
@@ -786,6 +812,7 @@ function ringAt(ctx, cam, canvas, q, r, radius, S, style, dashed) {
 }
 
 function drawHighlights(ctx, state, cam, canvas, S, ui) {
+  drawLocated(ctx, cam, canvas, S, ui);
   const h = ui.hover;
   if (!h) return;
   const t = tileAt(state, h.q, h.r);

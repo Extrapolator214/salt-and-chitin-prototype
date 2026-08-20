@@ -217,13 +217,20 @@ export function skip(reel) {
 /**
  * Advance by `dt` real seconds. Returns true when the last beat has played out.
  *
+ * `held` stops the clock without ending anything: a pane under the pointer does
+ * not time out, because the pane somebody has leaned in to read is precisely
+ * the one about to close itself. The reel owns this rather than the caller
+ * skipping the call, so "held" cannot drift into meaning "finished".
+ *
  * The camera is a separate call — `cameraTarget` and `glide` — because only the
- * caller knows the hex size the target has to be measured in.
+ * caller knows the hex size the target has to be measured in, and because the
+ * camera keeps easing onto the beat already on screen even while it is held.
  */
-export function tick(reel, dt) {
+export function tick(reel, dt, held = false) {
   if (reel.done) return true;
   const b = beat(reel);
   if (!b) { reel.done = true; return true; }
+  if (held) return false;
 
   reel.t += dt * reel.speed;
   if (reel.t >= b.seconds) next(reel);
@@ -280,9 +287,18 @@ export function walkPositions(reel) {
 
 // ---- the splash ------------------------------------------------------------
 
-// `next` belongs to the pane and not to the settings panel: it acts on the one
-// thing in front of you, so it sits on the thing in front of you.
-const NEXT = '<div class="pane-next"><button data-r="next">next</button></div>';
+// The foot of every pane: how long it has left before it closes itself, and the
+// one control that acts on the pane rather than on the whole resolve.
+//
+// The bar is on the splash as well as in the panel because they answer different
+// questions from different places — the panel says how far through the resolve
+// you are, and this says how long *this* picture will stay up. It is the second
+// one you want while you are reading, and looking away to the side of the screen
+// to find it is exactly what you cannot afford to do.
+const FOOT = '<div class="pane-foot">'
+  + '<div class="pane-bar"><i></i></div>'
+  + '<button data-r="next">next</button>'
+  + '</div>';
 
 const pane = (title, body, note = '') =>
   `<h2>${esc(title)}</h2><pre class="art">${esc(body)}</pre>`
@@ -339,9 +355,9 @@ function releasePane(b) {
 export function paneHtml(reel) {
   const b = beat(reel);
   if (!b || b.kind === 'walk') return null;
-  if (b.kind === 'poi') return poiPane(b) + NEXT;
-  if (b.kind === 'breed') return breedPane(b) + NEXT;
-  if (b.kind === 'release') return releasePane(b) + NEXT;
+  if (b.kind === 'poi') return poiPane(b) + FOOT;
+  if (b.kind === 'breed') return breedPane(b) + FOOT;
+  if (b.kind === 'release') return releasePane(b) + FOOT;
   return null;
 }
 

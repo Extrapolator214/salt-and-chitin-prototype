@@ -92,6 +92,8 @@ for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late]])
       // Mid-reel: every body and every blob is between hexes, so the two passes
       // that take fractional coordinates are drawn as well as the integer ones.
       ['mid-march', { hover: null, reel: {}, walk: midStride(s) }],
+      ['a located tile, with the pointer elsewhere',
+        { hover: { q: s.base.q + 2, r: s.base.r }, located: { q: s.base.q - 4, r: s.base.r + 1 } }],
     ]) {
       frames.push({ label: `${label} · zoom ${zoom} · ${what}`, s, zoom, ui });
     }
@@ -233,6 +235,31 @@ t(`the map draws in every mode without throwing`, !threw,
   }
 }
 
+// The camera ease "locate" rides on. It is the reel's own glide, so it is pinned
+// here rather than trusted: a locate that stops short leaves the player looking
+// at the wrong ground with a mark they cannot see.
+{
+  const cam = camera.createCamera();
+  cam.x = 4000; cam.y = -2500;
+  const target = H.axialToPixel(-16, 34, camera.hexSize(cam));
+  const trail = [];
+  for (let i = 0; i < 240; i++) {                       // four seconds at 60fps
+    reel.glide(cam, target, 1 / 60);
+    if (i % 60 === 59) trail.push(Math.round(Math.hypot(cam.x - target.x, cam.y - target.y)));
+  }
+  const start = Math.hypot(4000 - target.x, -2500 - target.y);
+  t('the camera eases onto a located tile and settles on it',
+    trail[trail.length - 1] < 1 && trail[0] < start / 2 && trail.every((d, i) => i === 0 || d <= trail[i - 1]),
+    `${Math.round(start)}px away -> ${trail.join(' -> ')}`);
+
+  // and it is a no-op with nothing to go to, which is what the frame loop
+  // leans on every frame the player has not asked to be taken anywhere
+  const still = camera.createCamera();
+  still.x = 12; still.y = 34;
+  reel.glide(still, null, 1 / 60);
+  t('a camera with nowhere to go does not drift', still.x === 12 && still.y === 34, 'held still');
+}
+
 // A cohort released this turn was never in the snapshot — it was born at its
 // spawner and advanced in the same resolve — so its march has to start at the
 // mound rather than at wherever it ended up.
@@ -331,6 +358,23 @@ t(`the map draws in every mode without throwing`, !threw,
     t('the splash carries next, and only next',
       poi.includes('data-r="next"') && !poi.includes('data-r="skip"') && !poi.includes('data-r="1"'),
       'splash pane');
+    t('the splash carries its own countdown, so a reader need not look away',
+      poi.includes('pane-bar') && panel.includes('reel-bar'), 'both bars');
+
+    // A pane under the pointer does not time out. Held has to mean "stopped",
+    // never "finished" — a hold that reported done would close the very pane
+    // somebody had leaned in to read.
+    const held = { beats: [{ kind: 'breed', spawners: [], focus: null, seconds: 2 }], i: 0, t: 0, speed: 1, done: false };
+    const doneWhileHeld = reel.tick(held, 60, true);
+    const tHeld = held.t;
+    reel.tick(held, 1, false);
+    t('a pane under the pointer holds its clock, and holding is not finishing',
+      !doneWhileHeld && tHeld === 0 && !held.done && held.t === 1,
+      `t after a 60s hold ${tHeld}, then ${held.t} after a second of running`);
+
+    // and letting go still closes it on time
+    reel.tick(held, 1.1, false);
+    t('letting go lets the pane close itself', held.done, `beat ${held.i + 1} of ${held.beats.length}`);
   }
 
   t('every point of interest has a splash, including an unknown one',

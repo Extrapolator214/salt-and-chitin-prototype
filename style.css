@@ -251,11 +251,24 @@ kbd { color: var(--dim); font-size: 11px; }
   letter-spacing: .06em; text-transform: uppercase;
 }
 .reel-arrow { color: var(--dim); text-align: center; line-height: 1.1; }
-/* Bottom right of the pane, under a rule, so it never sits amongst the picture. */
-.pane-next {
-  display: flex; justify-content: flex-end;
+/* Under a rule at the foot of the pane, so neither the countdown nor the button
+   ever sits amongst the picture. The bar takes the width the button leaves. */
+.pane-foot {
+  display: flex; align-items: center; gap: 12px;
   margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--edge);
 }
+.pane-foot .pane-bar { flex: 1; height: 2px; background: var(--edge); }
+.pane-foot .pane-bar > i {
+  display: block; height: 100%; background: var(--warn); width: 100%;
+}
+/* Held under the pointer: the clock has stopped, and the bar says so rather than
+   just appearing to have frozen. */
+#splash-pane.paused .pane-bar > i { background: var(--dim); }
+#splash-pane.paused .pane-bar::after {
+  content: 'paused'; position: absolute; margin: -18px 0 0 0;
+  font-size: 11px; color: var(--dim);
+}
+#splash-pane.paused .pane-bar { position: relative; }
 .reel-col .bar { color: var(--bad); letter-spacing: .12em; }
 
 

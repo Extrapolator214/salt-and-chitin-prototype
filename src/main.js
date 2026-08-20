@@ -42,8 +42,23 @@ const ui = {
   walk: null,          // mid-stride positions, set only during a walk beat
   // A setting rather than a per-reel control: chosen once and kept for the run.
   reelSpeed: 1,
+  located: null,       // a tile pinned by "locate", until the next click
   revoke: (id) => { O.revoke(state, id); refresh(); },
   place: (building) => { ui.placing = building; refresh(); },
+  /**
+   * Put a tile under the camera and leave a mark on it.
+   *
+   * The mark is the point: a camera move alone tells you the ground is *near
+   * here somewhere*, and on a map of four thousand hexes that is not an answer.
+   * It outlives the pointer — the hover outline follows the mouse, so anything
+   * carried by hover is gone the instant you look for it — and it is cleared by
+   * the next click, which is the moment you have plainly finished with it.
+   */
+  locate: (at) => {
+    ui.located = { q: at.q, r: at.r };
+    lookAt = { q: at.q, r: at.r };
+    refresh();
+  },
   order: (o) => { const r = O.enqueue(state, o); if (!r.ok) flash(r.why); return r; },
   refresh,
   endTurn: () => endTurn(true),
@@ -52,6 +67,8 @@ const ui = {
   newRun: (seed) => {
     state = createState(seed || modals.nextSeed(state.seed));
     ui.pendingEvents = [];
+    ui.located = null;
+    lookAt = null;
     endReel();
     modals.close(ui);
     resize();
@@ -184,8 +201,29 @@ function afterReel() {
 
 // ---- the resolve reel ------------------------------------------------------
 
+// A tile the camera is easing toward, or null. Eased rather than cut, and the
+// target is kept as a tile rather than as a world point so that a zoom part way
+// through still lands on the same ground.
+let lookAt = null;
+
 // Where the player had the map pointed before the reel took the camera off them.
 let camBeforeReel = null;
+
+/**
+ * A pane under the pointer does not time out.
+ *
+ * The splash closes itself, which is right for a reel you are watching and
+ * wrong the moment you lean in to read one — the pane you are studying is
+ * precisely the one about to disappear. Reaching for the pointer is what
+ * somebody does when they want a closer look, so that is the signal.
+ *
+ * Bound once, to an element that outlives every beat: only the pane's contents
+ * are rebuilt, never the pane itself.
+ */
+let paneHeld = false;
+splashPane.addEventListener('mouseenter', () => { paneHeld = true; markHeld(); });
+splashPane.addEventListener('mouseleave', () => { paneHeld = false; markHeld(); });
+const markHeld = () => splashPane.classList.toggle('paused', paneHeld && !splash.hidden);
 
 /**
  * Put the reel away and give the map back — including the view.
@@ -199,6 +237,7 @@ function endReel() {
   ui.reel = null;
   ui.walk = null;
   splash.hidden = true;
+  markHeld();
   if (camBeforeReel) { cam.x = camBeforeReel.x; cam.y = camBeforeReel.y; }
   camBeforeReel = null;
 }
@@ -214,6 +253,7 @@ function showBeat() {
   r.dirty = false;
   const pane = reel.paneHtml(r);
   splash.hidden = !pane;
+  markHeld();
   if (pane) {
     splashPane.innerHTML = pane;
     // Its own handler rather than the panel's: the pane is rebuilt every beat,
@@ -261,14 +301,20 @@ function skipReel() {
 /** One frame of the reel: the clock, the camera, the walkers, the drain bar. */
 function tickReel(dt) {
   const r = ui.reel;
-  const done = reel.tick(r, dt);
-  ui.walk = reel.walkPositions(r);
+  // The camera still eases while a pane is held — it is following the beat
+  // already on screen, not running ahead to the next one.
   reel.glide(cam, reel.cameraTarget(r, hexSize(cam)), dt);
+  const done = reel.tick(r, dt, paneHeld);
+  ui.walk = reel.walkPositions(r);
   if (done) return afterReel();
   if (r.dirty) return showBeat();
   const b = reel.beat(r);
-  const bar = reelPanel.querySelector('#reel-bar > i');
-  if (bar && b) bar.style.width = `${Math.max(0, 100 - (r.t / b.seconds) * 100)}%`;
+  if (!b) return;
+  const left = `${Math.max(0, 100 - (r.t / b.seconds) * 100)}%`;
+  const panelBar = reelPanel.querySelector('#reel-bar > i');
+  if (panelBar) panelBar.style.width = left;
+  const paneBar = splashPane.querySelector('.pane-bar > i');
+  if (paneBar) paneBar.style.width = left;
 }
 
 function finishTurn() {
@@ -318,6 +364,11 @@ function frame(now) {
   last = now;
 
   resize();
+  if (lookAt && !ui.reel) {
+    const p = H.axialToPixel(lookAt.q, lookAt.r, hexSize(cam));
+    reel.glide(cam, p, dt);
+    if (Math.abs(cam.x - p.x) < 0.5 && Math.abs(cam.y - p.y) < 0.5) lookAt = null;
+  }
   if (ui.reel) {
     tickReel(dt);
   } else if (state.phase === 'combat' && state.combat) {
@@ -349,6 +400,7 @@ window.addEventListener('mouseup', (e) => {
   if (!dragging) return;
   dragging = false;
   if (dragged || e.target !== canvas) return;
+  ui.located = null;                   // a click is the end of looking for it
   const h = screenToAxial(cam, canvas, e.offsetX, e.offsetY);
   if (e.shiftKey) assignClearAt(h);
   else clickTile(h);
