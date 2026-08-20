@@ -855,11 +855,16 @@ export function projectedItems(state) {
   };
   const has = (tower, tier) => hold.some((it) => it.tower === tower && it.tier === tier);
   const count = (tower, tier) => hold.filter((it) => it.tower === tower && it.tier === tier).length;
+  // The tier a new emplacement would take, over the projected hold rather than
+  // the real one: queue two towers of a kind and the second is quoted the
+  // fitting the first one leaves behind, not the one it is about to spend.
+  const lowest = (tower) => hold.reduce((low, it) =>
+    (it.tower === tower && (!low || it.tier < low) ? it.tier : low), 0);
   for (const o of state.orders) {
     switch (o.type) {
       case 'buyItem': case 'craftItem': hold.push({ tower: o.tower, tier: 1 }); break;
       case 'buildTower':
-        if (C.TOWER_NEEDS_ITEM) take(o.towerIndex, 1);
+        if (C.TOWER_NEEDS_ITEM) take(o.towerIndex, lowest(o.towerIndex));
         break;
       case 'mergeItems':
         take(o.tower, o.tier); take(o.tower, o.tier);
@@ -883,11 +888,11 @@ export function projectedItems(state) {
       default: break;
     }
   }
-  return { hold, towerTier, towerKind, has, count };
+  return { hold, towerTier, towerKind, has, count, lowest };
 }
 
 function checkAgainstQueue(state, order) {
-  const { hold, towerTier, towerKind, has, count } = projectedItems(state);
+  const { hold, towerTier, towerKind, has, count, lowest } = projectedItems(state);
   const cap = holdCap(state);
   switch (order.type) {
     case 'buyItem': case 'craftItem':
@@ -904,7 +909,7 @@ function checkAgainstQueue(state, order) {
     }
     case 'buildTower':
       if (!C.TOWER_NEEDS_ITEM) return ok;
-      return has(order.towerIndex, 1) ? ok : no(`needs a tier-1 ${C.itemName(order.towerIndex)}`);
+      return lowest(order.towerIndex) ? ok : no(`needs a ${C.itemName(order.towerIndex)} in the hold`);
     case 'disassembleTower': case 'evolve':
       return towerTier.has(order.towerId) ? ok : no('already queued for removal');
     case 'assignMan': {

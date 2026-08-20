@@ -145,12 +145,13 @@ Loss condition: `hull <= 0`.
 | `EVOLVED_MULT` | 2.5 → evolved tier 5 = 97.66 |
 | manning by tier | t1–3: 1 hand · t4: 2 · t5: 2 · evolved: 3 |
 | footprint by tier | t1–3: 1 tile · t4–5: 2 tiles · evolved: 3 tiles |
-| `TOWER_BUILD_COST` | 30 wood + 20 stone (tier 1 only) |
+| `TOWER_BUILD_COST` | 30 wood + 20 stone, plus one fitting of its kind from the hold, any tier |
 | `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory |
 | `CLIFF_RANGE_BONUS` | +1 tile |
 
-**A tower is built at tier 1 and never at any other.** It rises by having a
-higher-tier item fitted in place; the displaced item returns to inventory.
+**A tower is built at the tier of the fitting it takes**, and the lowest tier
+held is the one taken. It rises from there by having a higher-tier item fitted
+in place; the displaced item returns to inventory.
 
 An **unmanned tower stands and does not fire.** That is a legal board state.
 

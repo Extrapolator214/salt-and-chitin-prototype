@@ -298,7 +298,7 @@ function policy(s, k, m) {
   // --- 4 · fittings. Each tower takes its own, so buy for the guns that are
   //     standing, merge those stacks up, and fit the best of each.
   // the minor kind has to be bought for too, or the evolution partner can never
-  // be founded — a tower is raised on a tier-1 fitting of its own kind
+  // be founded — a tower is raised on a fitting of its own kind and no other
   const mateKind = evolutionPartners(k.towerKind).filter((i) => i < C.TOWERS.length)[0];
   const kinds = [...new Set([k.towerKind, mateKind, ...s.towers.map((t) => t.towerIndex)])]
     .filter((i) => i !== undefined);
@@ -308,8 +308,10 @@ function policy(s, k, m) {
     if (!O.enqueue(s, { type: 'buyItem', tower: kind }).ok) break;
     bought++;
   }
-  // Merging greedily starves the yard: a tower is founded on a TIER-1 fitting,
-  // so the last one must be left alone while there are still guns to raise.
+  // Merging greedily starves the yard. An emplacement takes whatever tier it is
+  // handed, so this is no longer a rule it would break — but it is still the
+  // right play: the founding spends the lowest tier held, and a stack merged
+  // away is a gun that has to be bought again before the next tower goes up.
   const wantMore = s.towers.length < k.maxTowers;
   let merged = true;
   while (merged) {

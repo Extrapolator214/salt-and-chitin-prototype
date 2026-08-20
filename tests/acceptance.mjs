@@ -1198,6 +1198,89 @@ runSection('3.6', () => {
     t('a tier-1 tower with one hand deals 1.0 dps', Math.abs(St.towerPower(s, tower) - 1) < 1e-9, String(St.towerPower(s, tower)));
   }
   {
+    // A tower takes a fitting of its own kind at whatever tier it finds, and is
+    // built at that tier. Holding one tier-2 gun and nothing else used to be
+    // holding nothing at all: the emplacement asked for a tier-1 and refused.
+    const s = St.createState(20260816);
+    s.res.wood = 1e6; s.res.stone = 1e6;
+    // The nearest ground that would take an emplacement, with a lane cut to it
+    // so the crew can reach it — the same setup the crag test above uses, since
+    // an unreachable site is refused before the fitting is ever looked at.
+    const spot = [...s.map.tiles.values()]
+      .filter((x) => !x.occupant && St.isBuildable(s, x, true))
+      .sort((a, b) => H.distance(a, s.base) - H.distance(b, s.base))[0];
+    for (const p of H.line(s.base, spot).slice(0, -1)) {
+      const tt = St.tileAt(s, p.q, p.r);
+      if (tt && !St.isOpenGround(tt)) { tt.terrain = 'road'; tt.cleared = true; }
+    }
+    St.touchMap(s);
+
+    t('with nothing of its kind held, the refusal names no tier',
+      !B.canBuildTower(s, spot.q, spot.r, 0).ok
+      && B.canBuildTower(s, spot.q, spot.r, 0).why === `needs a ${C.itemName(0)} in the hold`,
+      B.canBuildTower(s, spot.q, spot.r, 0).why);
+
+    // one tier-2 gun and nothing else — the case that was refused outright
+    B.addItem(s, 0, 2);
+    t('one tier-2 fitting is enough to raise the emplacement',
+      B.canBuildTower(s, spot.q, spot.r, 0).ok, B.canBuildTower(s, spot.q, spot.r, 0).why || 'ok');
+    const t2 = B.buildTower(s, spot.q, spot.r, 0);
+    t('and the tower goes up at the fitting\'s own tier',
+      t2.tier === 2 && t2.itemTier === 2 && !s.base.hold.length,
+      `tier ${t2.tier}, fitted ${t2.itemTier}, ${s.base.hold.length} left in the hold`);
+    t('a tier-2 tower is worth more than a tier-1 one',
+      C.power(t2.tier) > C.power(1), `${C.power(t2.tier)} against ${C.power(1)}`);
+    B.disassembleTower(s, t2);
+    s.base.hold.length = 0;
+
+    // holding both, the cheap one is spent and the good one kept back
+    B.addItem(s, 0, 1); B.addItem(s, 0, 3);
+    const t1 = B.buildTower(s, spot.q, spot.r, 0);
+    t('holding better and worse, the emplacement spends the worse',
+      t1.tier === 1 && s.base.hold.length === 1 && s.base.hold[0].tier === 3,
+      `built tier ${t1.tier}, tier-${s.base.hold[0].tier} still held`);
+    B.disassembleTower(s, t1);
+    s.base.hold.length = 0;
+
+    // and the queue agrees with the sim, since it is what the button asks
+    B.addItem(s, 0, 2);
+    t('the order queue takes any tier too',
+      O.canEnqueue(s, { type: 'buildTower', q: spot.q, r: spot.r, towerIndex: 0 }).ok,
+      O.canEnqueue(s, { type: 'buildTower', q: spot.q, r: spot.r, towerIndex: 0 }).why || 'ok');
+    s.base.hold.length = 0;
+
+    // Past tier 3 the emplacement is two tiles, so the ground has to be there
+    // before the order is taken — a rule that only used to bite on a fitting
+    // put in later, because nothing could ever be built above tier 1.
+    B.addItem(s, 0, 4);
+    const wide = C.footprintFor(4, false);
+    const big = B.canBuildTower(s, spot.q, spot.r, 0).ok ? B.buildTower(s, spot.q, spot.r, 0) : null;
+    t('a tier-4 fitting raises a tier-4 tower on the ground it needs',
+      !!big && big.tier === 4 && big.footprint.length === wide,
+      big ? `tier ${big.tier} on ${big.footprint.length} tile(s), wants ${wide}` : 'not buildable');
+    if (big) B.disassembleTower(s, big);
+    s.base.hold.length = 0;
+
+    // ...and is refused where it will not. Sand is the honest way to build that
+    // case: the crew walk it, so the site is still reachable and the refusal is
+    // about the emplacement rather than about the road to it — but nothing can
+    // be built on it, so the second tile has nowhere to go.
+    B.addItem(s, 0, 4);
+    for (const n of H.neighbours(spot.q, spot.r)) {
+      const nb = St.tileAt(s, n.q, n.r);
+      if (nb && !nb.occupant) { nb.terrain = 'sand'; nb.cleared = false; nb.work = 0; }
+    }
+    St.touchMap(s);
+    const refused = B.canBuildTower(s, spot.q, spot.r, 0);
+    t('a high-tier fitting is refused where the emplacement will not fit',
+      !refused.ok && /more cleared ground/.test(refused.why || ''), refused.why || 'allowed');
+    // and the same ground still takes the tier it does fit
+    s.base.hold.length = 0;
+    B.addItem(s, 0, 1);
+    t('and the same ground still takes the tier that does fit',
+      B.canBuildTower(s, spot.q, spot.r, 0).ok, B.canBuildTower(s, spot.q, spot.r, 0).why || 'ok');
+  }
+  {
     const s = St.createState(20260816);
     const sp = s.spawners[0];
     const near = H.atBearing(sp, 0, C.EXCLUSION_RADIUS - 1);

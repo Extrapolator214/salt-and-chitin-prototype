@@ -109,16 +109,28 @@ const VIEWS = {
     let h = `<h2>Build a tower at (${q}, ${r})</h2>`;
     if (!site.ok) h += `<p class="why">${esc(site.why)}</p>`;
     h += `<p class="note">${costText(C.TOWER_COST)} for the emplacement` +
-      (C.TOWER_NEEDS_ITEM ? ', and a tier-1 fitting out of the hold for the gun' : '') +
-      '. Every tower is built at tier 1 and rises only by having a higher-tier fitting of its own kind put in place.</p>';
-    h += '<table><tr><th>tower</th><th>range</th><th>fire</th><th>fitting</th><th>held</th><th>cost</th><th></th><th></th></tr>';
+      (C.TOWER_NEEDS_ITEM ? ', and a fitting out of the hold for the gun' : '') +
+      '. A tower is built at the tier of the fitting it takes, and rises from there '
+      + 'by having a higher-tier fitting of its own kind put in place. The lowest you hold '
+      + 'is the one spent, so a better gun is never used up on the emplacement.</p>';
+    h += '<table><tr><th>tower</th><th>range</th><th>fire</th><th>fitting</th><th>held</th><th>builds at</th><th>cost</th><th></th><th></th></tr>';
     for (const def of C.TOWERS) {
       const order = { type: 'buildTower', q, r, towerIndex: def.i };
       const can = O.canEnqueue(state, order);
-      const have = proj.count(def.i, 1);
+      // Every tier of this kind, and the one the emplacement would actually
+      // take — which is the tier the tower goes up at.
+      const held = proj.hold.filter((it) => it.tower === def.i).map((it) => it.tier).sort((a, b) => a - b);
+      const takes = held[0] || 0;
+      const tally = held.length
+        ? held.reduce((m, t) => m.set(t, (m.get(t) || 0) + 1), new Map())
+        : null;
+      const heldText = tally
+        ? [...tally.entries()].map(([t, n]) => `<b>t${t}</b>×${n}`).join(' ')
+        : '<span class="why">none</span>';
       h += row([
         `<b style="color:${def.colour}">${def.name}</b>`, def.range, def.fire,
-        esc(C.itemName(def.i)), have ? `<b>${have}</b>` : '<span class="why">0</span>',
+        esc(C.itemName(def.i)), heldText,
+        takes ? `tier <b>${takes}</b>` : '—',
         costText(C.TOWER_COST), btn('Build', 'order', order, !can.ok),
       ], !can.ok, can.ok ? '' : can.why);
     }

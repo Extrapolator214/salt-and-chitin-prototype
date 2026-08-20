@@ -33,6 +33,25 @@ export const itemsOf = (state, tower, tier) =>
 
 export const countOf = (state, tower, tier) => itemsOf(state, tower, tier).length;
 
+/**
+ * The fitting a new emplacement would take: the lowest tier of its kind held,
+ * or 0 for none at all.
+ *
+ * Lowest, deliberately. A tower is built at the tier of the fitting it takes,
+ * so handing it the best one in the hold would spend a tier-4 gun on an
+ * emplacement a tier-1 would have raised — and the tier-1 route reaches the
+ * same place, because a standing tower rises by having a better fitting put in.
+ * Taking the cheapest never costs the player a tier they could have had.
+ */
+export function buildTier(state, tower) {
+  let low = 0;
+  for (const it of state.base.hold) {
+    if (it.tower !== tower) continue;
+    if (!low || it.tier < low) low = it.tier;
+  }
+  return low;
+}
+
 export function takeItem(state, tower, tier) {
   const i = state.base.hold.findIndex((it) => it.tower === tower && it.tier === tier);
   return i >= 0 ? state.base.hold.splice(i, 1)[0] : null;
@@ -221,21 +240,34 @@ export function canBuildTower(state, q, r, towerIndex) {
   if (!neighbours(q, r).some((n) => reach.has(key(n.q, n.r)))) {
     return no('no way to walk to it — open the ground beside it first');
   }
-  // the emplacement is wood and stone; the gun is a tier-1 fitting
-  if (C.TOWER_NEEDS_ITEM && towerIndex !== undefined && !countOf(state, towerIndex, 1)) {
-    return no(`needs a tier-1 ${C.itemName(towerIndex)}`);
+  // The emplacement is wood and stone; the gun is a fitting out of the hold, of
+  // this tower's own kind and of any tier. Which tier it is decides what the
+  // tower is built at, and past tier 3 that is a bigger emplacement — so the
+  // ground beside it has to be there before the order is taken, not after.
+  if (C.TOWER_NEEDS_ITEM && towerIndex !== undefined) {
+    const tier = buildTier(state, towerIndex);
+    if (!tier) return no(`needs a ${C.itemName(towerIndex)} in the hold`);
+    const need = C.footprintFor(tier, false);
+    if (need > 1 && !growFootprint(state, { q, r, footprint: [{ q, r }] }, need)) {
+      return no(`a tier-${tier} ${C.itemName(towerIndex)} needs more cleared ground beside it`);
+    }
   }
   return ok;
 }
 
 export function buildTower(state, q, r, towerIndex) {
   const def = C.TOWERS[towerIndex];
-  if (C.TOWER_NEEDS_ITEM) takeItem(state, towerIndex, 1);
+  const tier = C.TOWER_NEEDS_ITEM ? buildTier(state, towerIndex) || 1 : 1;
+  if (C.TOWER_NEEDS_ITEM) takeItem(state, towerIndex, tier);
+  const need = C.footprintFor(tier, false);
+  const footprint = need > 1
+    ? growFootprint(state, { q, r, footprint: [{ q, r }] }, need) || [{ q, r }]
+    : [{ q, r }];
   const tower = {
     id: nextId(state, 'tw'),
-    q, r, towerIndex, tier: 1, evolved: false,
-    essence: [def.essence], itemTier: C.TOWER_NEEDS_ITEM ? 1 : 0,
-    footprint: [{ q, r }],
+    q, r, towerIndex, tier, evolved: false,
+    essence: [def.essence], itemTier: C.TOWER_NEEDS_ITEM ? tier : 0,
+    footprint,
     complete: false,
   };
   state.towers.push(tower);

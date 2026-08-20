@@ -30,8 +30,11 @@ a bar. It updates live as the player reassigns.
 
 ### Building
 
-A tower is **built at tier 1 only**: 30 wood + 20 stone, one tile, one hand to
-man. It cannot be built:
+A tower is **built at the tier of the fitting it takes**: 30 wood + 20 stone for
+the emplacement, plus one fitting of its own kind out of the hold, of any tier.
+The **lowest** tier held is the one spent, so a better gun is never used up on
+an emplacement a worse one would have raised. Tier decides the footprint and the
+manning, as it does for a fitting put in later. It cannot be built:
 
 - on `sand`, `salt`, `freshwater` (unbridged), `saltwater`, or an occupied tile
 - within `EXCLUSION_RADIUS = 7` of a living spawner
