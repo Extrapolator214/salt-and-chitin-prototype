@@ -1,0 +1,119 @@
+// The turn structure. resolveTurn runs 03-turn.md §3 steps 1-9 and returns the
+// event list; concludeTurn runs step 10 and hands control back to the player.
+
+import C from './config.js';
+import { tileAt, addLog, isBuildingManned, handsCap, handCount, totalPower, touchMap, landHands } from './state.js';
+import { applyQueue } from './orders.js';
+import { runLabour, runMovement } from './labour.js';
+import { runSpawners, advanceCohorts, escalate } from './enemy.js';
+import { tickAssaults } from './assault.js';
+import { beginCombat } from './combat.js';
+
+// 3 · construction: towers, buildings, bridges complete
+function completeConstruction(state, events) {
+  for (const t of state.towers) if (!t.complete) { t.complete = true; }
+  for (const b of state.buildings) if (!b.complete) { b.complete = true; }
+  touchMap(state);
+}
+
+// 4 · buildings produce
+function produce(state, events) {
+  const gained = { iron: 0, gold: 0 };
+  for (const b of state.buildings) {
+    if (!isBuildingManned(state, b)) continue;
+    if (b.type === 'forge' && state.res.stone >= C.FORGE_STONE_IN) {
+      state.res.stone -= C.FORGE_STONE_IN;
+      state.res.iron += C.FORGE_IRON_OUT;
+      state.stats.ironEarned += C.FORGE_IRON_OUT;
+      gained.iron += C.FORGE_IRON_OUT;
+    }
+    if (b.type === 'dock') {
+      const from = state.res.wood >= state.res.stone ? 'wood' : 'stone';
+      if (state.res[from] >= C.DOCK_INPUT) {
+        state.res[from] -= C.DOCK_INPUT;
+        state.res.gold += C.DOCK_GOLD_OUT;
+        state.stats.goldEarned += C.DOCK_GOLD_OUT;
+        gained.gold += C.DOCK_GOLD_OUT;
+      }
+    }
+    if (b.type === 'excavation' && b.progress < C.EXCAVATION_TURNS) {
+      b.progress++;
+      if (b.progress >= C.EXCAVATION_TURNS) {
+        state.res.gold += C.EXCAVATION_GOLD;
+        state.stats.goldEarned += C.EXCAVATION_GOLD;
+        gained.gold += C.EXCAVATION_GOLD;
+        events.push({ kind: 'cache', gold: C.EXCAVATION_GOLD });
+        addLog(state, `a treasure cache pays out ${C.EXCAVATION_GOLD} gold`);
+      }
+    }
+  }
+  if (gained.iron || gained.gold) events.push({ kind: 'produced', ...gained });
+}
+
+// 5 · flares in flight land; hands added
+function landFlares(state, events) {
+  const landed = state.crew.flaresInFlight.filter((f) => f.landsOnTurn <= state.turn);
+  if (!landed.length) return;
+  state.crew.flaresInFlight = state.crew.flaresInFlight.filter((f) => f.landsOnTurn > state.turn);
+  for (const _ of landed) {
+    const room = Math.max(0, handsCap(state) - handCount(state));
+    landHands(state, Math.min(room, C.FLARE_HANDS));
+    state.crew.flaresFired++;
+  }
+  events.push({ kind: 'flareLanded', count: landed.length, hands: handCount(state) });
+  addLog(state, `a boat lands — ${landed.length * C.FLARE_HANDS} hands, ${handCount(state)} in all`);
+}
+
+/** Steps 1-9. Returns the event list; sets phase to 'combat' if contact happened. */
+export function resolveTurn(state) {
+  const events = [];
+  state.phase = 'resolve';
+
+  applyQueue(state, events);                                   // 1
+  runMovement(state, events);                                  // 1b — walking first
+  runLabour(state, events);                                    // 2
+  completeConstruction(state, events);                         // 3
+  produce(state, events);                                      // 4
+  landFlares(state, events);                                   // 5
+  tickAssaults(state, events);                                 // 6
+  if (state.turn % C.ESCALATION_TURNS === 0) escalate(state, events); // 7
+  runSpawners(state, events);                                  // 8
+  const contacts = advanceCohorts(state, events);               // 9
+
+  state.stats.peakPower = Math.max(state.stats.peakPower, totalPower(state));
+
+  if (contacts.length) {
+    beginCombat(state, contacts, events);
+    events.combat = true;
+  }
+  return events;
+}
+
+/** Step 10, then the clock moves. */
+export function concludeTurn(state, events = []) {
+  if (state.base.hull <= 0) {
+    state.outcome = 'lost:hull';
+  } else if (state.spawners.every((s) => !s.alive)) {
+    state.outcome = 'won';
+  } else if (state.turn >= C.ARMADA_TURN) {
+    state.outcome = 'lost:armada';
+  }
+
+  if (state.outcome) {
+    state.phase = 'over';
+    events.push({ kind: 'over', outcome: state.outcome });
+    addLog(state, outcomeText(state.outcome));
+    return events;
+  }
+
+  state.turn++;
+  state.act = C.actOf(state.turn);
+  state.phase = 'player';
+  return events;
+}
+
+export const outcomeText = (outcome) => ({
+  won: 'both spawners are destroyed — the island is yours',
+  'lost:hull': 'the hull is breached — the ship is lost',
+  'lost:armada': 'turn 300 passes with a spawner alive — the armada arrives',
+}[outcome] || outcome);

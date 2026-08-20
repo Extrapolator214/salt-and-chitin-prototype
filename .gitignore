@@ -1,0 +1,6 @@
+# JetBrains project settings — local to one machine, not part of the prototype.
+.idea/
+
+# Editor and OS scratch
+*.swp
+.DS_Store

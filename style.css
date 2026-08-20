@@ -1,0 +1,181 @@
+/* Bare bones: borders, padding, two backdrop colours. Nothing else. */
+
+:root {
+  --bg: #14161a;
+  --panel: #1c1f25;
+  --edge: #3a3f48;
+  --text: #d8d4cc;
+  --dim: #8a8579;
+  --warn: #d9a441;
+  --bad: #c8503a;
+  --good: #6fa86a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; height: 100%;
+  background: var(--bg); color: var(--text);
+  font: 13px/1.45 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  overflow: hidden;
+}
+
+#app { display: flex; flex-direction: column; height: 100%; }
+
+#hud {
+  border-bottom: 1px solid var(--edge);
+  padding: 6px 10px;
+  flex: none;
+  display: flex; align-items: flex-start;
+}
+/* Four boxes, ruled apart and one line tall: where the run is, what it can
+   spend, what it is made of, what it is standing on. */
+#hud .col {
+  /* `pre`, not `nowrap`: nowrap collapses runs of spaces, so the pairs in a box
+     ran together. pre keeps the gaps and does not wrap either. */
+  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+  flex: 1 1 0; min-width: 0;      /* even quarters of the bar, whatever the width */
+  padding: 0 16px; border-left: 1px solid var(--edge);
+}
+#hud .col:first-child { padding-left: 0; border-left: none; }
+#hud .k { color: var(--dim); }
+#hud b { color: #fff; }
+#hud .warn { color: var(--warn); }
+#hud .bad { color: var(--bad); }
+#hud .soon { color: var(--good); }
+
+/* The census is reference rather than a number played off turn to turn, and the
+   only thing here that grows with the map — so it hangs under the island box and
+   is shown on hover, rather than wrapping across the whole bar. */
+/* `overflow: visible` matters: the box clips its own contents like the others,
+   which would clip the census hanging out of the bottom of it. */
+#hud .island { position: relative; cursor: help; overflow: visible; }
+#hud .census {
+  display: none;
+  position: absolute; z-index: 20; top: 100%; left: 0; margin-top: 6px;
+  padding: 6px 12px; white-space: nowrap; line-height: 1.6;
+  color: var(--dim);
+  background: var(--panel); border: 1px solid var(--edge);
+}
+#hud .island:hover .census {
+  display: grid; grid-template-columns: auto auto; gap: 0 16px;
+}
+#hud .census .pct { text-align: right; }
+#hud .census .wide { grid-column: 1 / -1; padding-top: 4px; }
+#hud .census b { color: var(--text); font-weight: normal; }
+#hud .sw { margin-right: 3px; }
+/* Last thing on the bar, sized off it rather than off the action row: the bar is
+   one line tall and a full-size button would set the height of the whole thing. */
+#newrun { flex: none; margin-left: 16px; padding: 1px 8px; line-height: 1.4; }
+
+#middle { display: flex; flex: 1 1 auto; min-height: 0; position: relative; }
+#map { flex: 1 1 auto; min-width: 0; display: block; cursor: crosshair; }
+
+#side {
+  /* wide enough for the tile panel's longest packed line — two label/value
+     pairs, "enemy speed 0.50x  crew pass  yes" — without wrapping it */
+  width: 370px; flex: none;
+  border-left: 1px solid var(--edge);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.panel { padding: 6px 8px; overflow: auto; }
+#hover { flex: 1 1 60%; border-bottom: 1px solid var(--edge); white-space: pre-wrap; }
+#queue { flex: 1 1 40%; }
+
+/* Last in the column, so it sits on the bottom of the screen whatever else is
+   on it: the buttons are the one thing the player reaches for every turn, and
+   they should not move. The log sits above it rather than under it. */
+#actions {
+  flex: none; display: flex; gap: 6px; align-items: center;
+  padding: 6px 10px; border-top: 1px solid var(--edge);
+}
+#actions .spacer { flex: 1; }
+
+/* The feed lives over the map's left edge rather than in a band of its own: it
+   is glanced at, not read, and the map wants every pixel. Mostly transparent so
+   the ground still reads underneath, and `pointer-events: none` so the strip it
+   covers is still map you can click — it scrolls itself to the newest line, so
+   nobody needs to reach for it. */
+#log {
+  position: absolute; z-index: 5; left: 0; top: 0; bottom: 0; width: 340px;
+  overflow: hidden; pointer-events: none;
+  display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 8px 12px 10px;
+  /* holds its ground under the text and fades out before the edge */
+  background: linear-gradient(to right,
+    rgba(20, 22, 26, 0.78) 0%, rgba(20, 22, 26, 0.66) 62%, rgba(20, 22, 26, 0) 100%);
+  white-space: pre-wrap;
+  /* lifted off --dim and --edge: both are pitched against the panels' flat
+     background, and over open ground and forest they read as noise */
+  color: #b3aea2;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+}
+#log .l { padding: 1px 0; }
+#log .t { color: #736e64; margin-right: 2px; }
+
+button {
+  font: inherit; color: var(--text);
+  background: var(--panel); border: 1px solid var(--edge);
+  padding: 3px 9px; cursor: pointer;
+}
+button:hover:not(:disabled) { background: #262a31; }
+/* Same box as a button, so the seed field reads as part of the same row rather
+   than as the browser's own white slab dropped into a dark panel. */
+input[type="text"] {
+  font: inherit; color: var(--text);
+  background: #14161a; border: 1px solid var(--edge);
+  padding: 3px 6px;
+}
+input[type="text"]:focus { outline: none; border-color: #55606e; }
+button:disabled { color: #55595f; cursor: default; }
+kbd { color: var(--dim); font-size: 11px; }
+
+#backdrop {
+  position: fixed; inset: 0; background: rgba(8, 9, 11, 0.72);
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+#backdrop[hidden] { display: none; }
+#modal {
+  background: var(--panel); border: 1px solid var(--edge);
+  padding: 14px 16px; min-width: 460px; max-width: 860px;
+  max-height: 84vh; overflow: auto;
+}
+#modal h2 { margin: 0 0 10px; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+#modal h3 { margin: 14px 0 4px; font-size: 13px; color: var(--dim); }
+#modal table { border-collapse: collapse; width: 100%; }
+#modal th, #modal td { text-align: left; padding: 3px 8px 3px 0; border-bottom: 1px solid #23262c; vertical-align: top; }
+#modal th { color: var(--dim); font-weight: normal; }
+#modal tr.off td { color: #6a6e75; }
+#modal .why { color: var(--bad); }
+#modal .close { float: right; }
+#modal .note { color: var(--dim); }
+#modal tr.queued td { color: var(--warn); font-style: italic; }
+
+/* the item shop: a square per tier, its prices under it */
+.shop { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.shop .item { display: flex; flex-direction: column; gap: 4px; width: 172px; }
+.shop .sq {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; min-height: 88px; padding: 6px 4px; text-align: center;
+  border: 1px solid var(--edge); background: #191c21;
+}
+.shop .sq span { font-size: 11px; color: var(--dim); line-height: 1.3; }
+.shop .stack { margin-top: 3px; color: var(--text) !important; }
+.shop .stack span { color: var(--text); background: #2a3038; padding: 0 4px; margin-right: 2px; }
+.shop .btns { display: flex; flex-direction: column; gap: 3px; }
+.shop .btns button { width: 100%; text-align: left; font-size: 11px; padding: 2px 6px; }
+.shop .why { min-height: 14px; font-size: 11px; color: var(--bad); }
+
+#combat-strip {
+  position: fixed; left: 0; right: 280px; bottom: 0;
+  border-top: 1px solid var(--edge); background: rgba(20, 22, 26, .94);
+  padding: 6px 10px; z-index: 5; white-space: pre-wrap;
+}
+#combat-strip[hidden] { display: none; }
+#combat-strip button { margin-left: 6px; }
+
+.q-row { display: flex; justify-content: space-between; gap: 6px; }
+.q-row button { padding: 0 6px; line-height: 1.2; }
+.dim { color: var(--dim); }
+.bad { color: var(--bad); }
+.good { color: var(--good); }

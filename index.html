@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Salt &amp; Chitin — prototype</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="hud"></div>
+
+  <div id="middle">
+    <canvas id="map"></canvas>
+    <div id="log"></div>
+    <div id="side">
+      <div id="hover" class="panel"></div>
+      <div id="queue" class="panel"></div>
+    </div>
+  </div>
+
+  <div id="actions">
+    <button data-action="inventory">Inventory</button>
+    <button data-action="economy">Economy</button>
+    <button data-action="crew">Crew</button>
+    <button data-action="flare">Flare</button>
+    <button data-action="assault">Bug Sabotage mission</button>
+    <span id="crewnote" class="dim"></span>
+    <span class="spacer"></span>
+    <button data-action="endturn" id="endturn">End Turn <kbd>Space</kbd></button>
+  </div>
+</div>
+
+<div id="combat-strip" hidden></div>
+
+<div id="backdrop" hidden><div id="modal"></div></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
