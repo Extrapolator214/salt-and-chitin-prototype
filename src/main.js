@@ -214,8 +214,21 @@ function showBeat() {
   r.dirty = false;
   const pane = reel.paneHtml(r);
   splash.hidden = !pane;
-  if (pane) splashPane.innerHTML = pane;
+  if (pane) {
+    splashPane.innerHTML = pane;
+    // Its own handler rather than the panel's: the pane is rebuilt every beat,
+    // so the button on it is a different element each time.
+    const btn = splashPane.querySelector('[data-r="next"]');
+    if (btn) btn.onclick = () => nextBeat();
+  }
   renderReelPanel();
+}
+
+/** Step past the pane in front of you, ending the reel if it was the last. */
+function nextBeat() {
+  if (!ui.reel) return;
+  reel.next(ui.reel);
+  return ui.reel.done ? afterReel() : showBeat();
 }
 
 /**
@@ -231,11 +244,6 @@ function renderReelPanel() {
     b.onclick = () => {
       const v = b.dataset.r;
       if (v === 'skip') return skipReel();
-      if (v === 'next') {
-        if (!ui.reel) return;
-        reel.next(ui.reel);
-        return ui.reel.done ? afterReel() : showBeat();
-      }
       ui.reelSpeed = Number(v);
       if (ui.reel) ui.reel.speed = ui.reelSpeed;
       renderReelPanel();                               // repaint the pressed state
@@ -437,12 +445,7 @@ window.addEventListener('keydown', (e) => {
   // the next beat rather than ending a turn that is still being shown.
   if (ui.reel) {
     if (e.key === 'Escape') { e.preventDefault(); skipReel(); return; }
-    if (e.key === ' ') {
-      e.preventDefault();
-      reel.next(ui.reel);
-      if (ui.reel.done) afterReel(); else showBeat();
-      return;
-    }
+    if (e.key === ' ') { e.preventDefault(); nextBeat(); return; }
     return;
   }
   if (e.key === 'Escape') { ui.placing = null; modals.close(ui); refresh(); return; }

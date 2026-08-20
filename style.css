@@ -219,8 +219,10 @@ kbd { color: var(--dim); font-size: 11px; }
 }
 #splash[hidden] { display: none; }
 #splash-pane {
-  /* Nothing on the pane is clickable any more — every control moved to the side
-     panel — so it does not take pointer events back off the overlay. */
+  /* The overlay lets pointer events through to the inert map; the pane takes
+     them back for its own `next`, which is the one control that acts on the
+     pane in front of you rather than on the whole resolve. */
+  pointer-events: auto;
   background: var(--panel); border: 1px solid var(--edge);
   padding: 14px 18px 10px; min-width: 520px; max-width: 90vw;
   max-height: 88vh; overflow-y: auto; overflow-x: hidden;
@@ -249,6 +251,11 @@ kbd { color: var(--dim); font-size: 11px; }
   letter-spacing: .06em; text-transform: uppercase;
 }
 .reel-arrow { color: var(--dim); text-align: center; line-height: 1.1; }
+/* Bottom right of the pane, under a rule, so it never sits amongst the picture. */
+.pane-next {
+  display: flex; justify-content: flex-end;
+  margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--edge);
+}
 .reel-col .bar { color: var(--bad); letter-spacing: .12em; }
 
 

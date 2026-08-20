@@ -309,12 +309,29 @@ t(`the map draws in every mode without throwing`, !threw,
       panes.push(reel.paneHtml(fake));
     }
   } catch (e) { err = e.message; }
-  t('the panel renders with nothing playing, and offers no next or skip',
-    (() => {
-      const idle = reel.panelHtml(null, 3);
-      return idle.includes('Resolve turn animation') && idle.includes('data-r="3" class="on"')
-        && (idle.match(/disabled/g) || []).length === 2 && !idle.includes('reel-bar');
-    })(), 'idle panel');
+  // The split the panel and the splash are meant to have: the panel is settings
+  // plus the one control that acts on a whole resolve, and stepping a single
+  // beat lives on the pane it steps past. Pinned because it is the kind of thing
+  // that drifts back the moment either one is edited.
+  {
+    const idle = reel.panelHtml(null, 3);
+    t('idle, the panel is the settings and a skip with nothing to skip',
+      idle.includes('Resolve turn animation') && idle.includes('data-r="3" class="on"')
+      && !idle.includes('data-r="next"') && (idle.match(/disabled/g) || []).length === 1
+      && !idle.includes('reel-bar'),
+      'idle panel');
+
+    const live = { beats: [{ kind: 'breed', spawners: [], focus: null, seconds: 1 }], i: 0, t: 0, speed: 1, done: false };
+    const panel = reel.panelHtml(live, 1);
+    t('playing, skip is live and next is nowhere on the panel',
+      !panel.includes('disabled') && !panel.includes('data-r="next"') && panel.includes('reel-bar'),
+      'playing panel');
+
+    const poi = reel.paneHtml({ beats: [{ kind: 'poi', feature: 'cache', gold: 220, focus: { q: 0, r: 0 }, seconds: 1 }], i: 0, t: 0, speed: 1, done: false });
+    t('the splash carries next, and only next',
+      poi.includes('data-r="next"') && !poi.includes('data-r="skip"') && !poi.includes('data-r="1"'),
+      'splash pane');
+  }
 
   t('every point of interest has a splash, including an unknown one',
     !err && panes.length === 4 && panes.every((p) => p && p.includes('<pre')),

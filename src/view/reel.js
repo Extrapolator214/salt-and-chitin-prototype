@@ -280,6 +280,10 @@ export function walkPositions(reel) {
 
 // ---- the splash ------------------------------------------------------------
 
+// `next` belongs to the pane and not to the settings panel: it acts on the one
+// thing in front of you, so it sits on the thing in front of you.
+const NEXT = '<div class="pane-next"><button data-r="next">next</button></div>';
+
 const pane = (title, body, note = '') =>
   `<h2>${esc(title)}</h2><pre class="art">${esc(body)}</pre>`
   + (note ? `<p class="note">${note}</p>` : '');
@@ -335,9 +339,9 @@ function releasePane(b) {
 export function paneHtml(reel) {
   const b = beat(reel);
   if (!b || b.kind === 'walk') return null;
-  if (b.kind === 'poi') return poiPane(b);
-  if (b.kind === 'breed') return breedPane(b);
-  if (b.kind === 'release') return releasePane(b);
+  if (b.kind === 'poi') return poiPane(b) + NEXT;
+  if (b.kind === 'breed') return breedPane(b) + NEXT;
+  if (b.kind === 'release') return releasePane(b) + NEXT;
   return null;
 }
 
@@ -350,13 +354,14 @@ const BEAT_LABEL = {
 };
 
 /**
- * The panel in the side column: what is playing, how far through it is, and the
- * controls.
+ * The panel in the side column: the settings, and the one control that acts on
+ * a whole resolve rather than on the pane in front of you.
  *
  * Rendered whether or not a reel is running, because the speed is a standing
  * preference and not only a control — a player who has settled on 3x has
  * settled on it for the run, and a control that only exists while it is being
- * used cannot be set in advance.
+ * used cannot be set in advance. Stepping a single beat is the opposite kind of
+ * thing and lives on the splash instead.
  */
 export function panelHtml(reel, speed) {
   const on = (s) => (s === speed ? ' class="on"' : '');
@@ -366,7 +371,6 @@ export function panelHtml(reel, speed) {
     + `<button data-r="1"${on(1)}>1x</button>`
     + `<button data-r="3"${on(3)}>3x</button>`
     + '<span class="gap"></span>'
-    + `<button data-r="next"${b ? '' : ' disabled'}>next</button>`
     + `<button data-r="skip"${b ? '' : ' disabled'}>skip</button>`
     + '</div>';
 
