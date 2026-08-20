@@ -151,8 +151,9 @@ function endTurn(confirmed = false) {
   modals.close(ui);
 
   // Taken before the resolve, because the resolve moves them: the reel needs
-  // where everyone stood, and by the time it can be built nobody is there.
-  const before = reel.snapshotCrew(state);
+  // where everyone stood — crew and cohorts both — and by the time it can be
+  // built neither is there any more.
+  const before = reel.snapshotMovers(state);
   ui.pendingEvents = resolveTurn(state);
 
   ui.reel = reel.build(state, ui.pendingEvents, before);

@@ -15,6 +15,7 @@
 
 import C from '../sim/config.js';
 import { crewRoute } from '../sim/labour.js';
+import { findPath } from '../sim/enemy.js';
 import { axialToPixel } from '../sim/hex.js';
 import * as art from './ascii.js';
 
@@ -36,11 +37,19 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 // ---- building the reel -----------------------------------------------------
 
-/** Where every body stood before the resolve moved them. */
-export function snapshotCrew(state) {
-  const m = new Map();
-  for (const b of state.crew.members) m.set(b.id, { q: b.q, r: b.r });
-  return m;
+/**
+ * Where everything that moves stood before the resolve moved it.
+ *
+ * One snapshot for both sides, because both are walked in the same beat: the
+ * turn moves the crew at step 1b and the cohorts at step 9, and a player who
+ * watched those separately would be watching the same second of island twice.
+ */
+export function snapshotMovers(state) {
+  const crew = new Map();
+  for (const b of state.crew.members) crew.set(b.id, { q: b.q, r: b.r });
+  const cohorts = new Map();
+  for (const c of state.cohorts) cohorts.set(c.id, { q: c.q, r: c.r });
+  return { crew, cohorts };
 }
 
 /**
@@ -53,7 +62,7 @@ export function snapshotCrew(state) {
 function walkers(state, before) {
   const out = [];
   for (const b of state.crew.members) {
-    const from = before.get(b.id);
+    const from = before.crew.get(b.id);
     if (!from || (from.q === b.q && from.r === b.r)) continue;
     const route = crewRoute(state, from, { q: b.q, r: b.r });
     // An unreachable pair still walked — the ground closed behind them, or they
@@ -63,6 +72,33 @@ function walkers(state, before) {
       ? route.steps
       : [from, { q: b.q, r: b.r }];
     out.push({ id: b.id, kind: b.kind, path });
+  }
+  return out;
+}
+
+/**
+ * The advance, as routes rather than as two endpoints.
+ *
+ * Only the cohorts still standing at the end of the resolve. One that reached a
+ * road is gone from the list — it has become a fight, with its own real-time
+ * animation starting the moment the reel ends — and one that merged into
+ * another has been absorbed into a blob that is itself walking.
+ *
+ * A cohort released this turn has no `before` at all: it was born at its
+ * spawner and advanced in the same resolve, so the mound it came out of is
+ * where its walk starts.
+ */
+function marchers(state, before) {
+  const out = [];
+  for (const c of state.cohorts) {
+    const born = state.spawners.find((sp) => sp.id === c.spawnerId);
+    const from = before.cohorts.get(c.id) || (born && { q: born.q, r: born.r });
+    if (!from || (from.q === c.q && from.r === c.r)) continue;
+    // The same A* the advance itself walked, so the blob retraces its own
+    // route rather than sliding through whatever lies between the endpoints.
+    const found = findPath(state, from, { q: c.q, r: c.r }, 'advance');
+    const path = found && found.length > 1 ? found : [from, { q: c.q, r: c.r }];
+    out.push({ id: c.id, path });
   }
   return out;
 }
@@ -86,12 +122,19 @@ export function build(state, events, before) {
   const beats = [];
 
   const moved = walkers(state, before);
-  if (moved.length) {
-    const steps = Math.max(...moved.map((w) => w.path.length - 1));
+  const marched = marchers(state, before);
+  if (moved.length || marched.length) {
+    const all = [...moved, ...marched];
+    const steps = Math.max(...all.map((w) => w.path.length - 1));
     beats.push({
       kind: 'walk',
       movers: moved,
-      focus: centroid(moved.flatMap((w) => [w.path[0], w.path[w.path.length - 1]])),
+      marchers: marched,
+      // Framed on the crew when there are any, because that is where the player
+      // is working and what they pressed the button to see. Only a turn with
+      // nobody walking hands the camera to the enemy.
+      focus: centroid((moved.length ? moved : marched)
+        .flatMap((w) => [w.path[0], w.path[w.path.length - 1]])),
       seconds: Math.min(WALK_MAX, WALK_MIN + WALK_PER_STEP * steps),
     });
   }
@@ -196,28 +239,37 @@ export function glide(cam, target, dt) {
   cam.y += (target.y - cam.y) * k;
 }
 
+/** How far along its own route one mover is, in fractional axial coordinates. */
+function along(path, done) {
+  const last = path.length - 1;
+  const at = done * last;
+  const i = Math.min(last, Math.floor(at));
+  const j = Math.min(last, i + 1);
+  const f = at - i;
+  return {
+    q: path[i].q + (path[j].q - path[i].q) * f,
+    r: path[i].r + (path[j].r - path[i].r) * f,
+  };
+}
+
 /**
- * Every walker's position part way along its own route, in fractional axial
- * coordinates. Null when the current beat is not the walk, which is what tells
- * the renderer to go back to drawing bodies where the state says they stand.
+ * Everything mid-stride: the crew and the cohorts both, keyed by id, in
+ * fractional axial coordinates.
+ *
+ * Null when the current beat is not the walk, which is what tells the renderer
+ * to go back to drawing both where the state says they stand. Two maps rather
+ * than one, because a crew id and a cohort id are drawn by different passes and
+ * nothing should depend on the two id spaces never colliding.
  */
 export function walkPositions(reel) {
   const b = beat(reel);
   if (!b || b.kind !== 'walk') return null;
   const done = Math.max(0, Math.min(1, reel.t / b.seconds));
-  const out = new Map();
-  for (const w of b.movers) {
-    const last = w.path.length - 1;
-    const at = done * last;
-    const i = Math.min(last, Math.floor(at));
-    const j = Math.min(last, i + 1);
-    const f = at - i;
-    out.set(w.id, {
-      q: w.path[i].q + (w.path[j].q - w.path[i].q) * f,
-      r: w.path[i].r + (w.path[j].r - w.path[i].r) * f,
-    });
-  }
-  return out;
+  const crew = new Map();
+  for (const w of b.movers) crew.set(w.id, along(w.path, done));
+  const cohorts = new Map();
+  for (const w of b.marchers) cohorts.set(w.id, along(w.path, done));
+  return { crew, cohorts };
 }
 
 // ---- the splash ------------------------------------------------------------

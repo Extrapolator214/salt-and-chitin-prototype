@@ -76,6 +76,12 @@ late.res.wood = 1e6; late.res.stone = 1e6; late.res.gold = 1e6;
   if (yard) B.buildBuilding(late, 'forge', yard.q, yard.r);
 }
 
+/** Everything on the island, nudged half a hex off its own tile. */
+const midStride = (s) => ({
+  crew: new Map(s.crew.members.map((m) => [m.id, { q: m.q + 0.5, r: m.r - 0.5 }])),
+  cohorts: new Map(s.cohorts.map((c) => [c.id, { q: c.q + 0.5, r: c.r - 0.5 }])),
+});
+
 const frames = [];
 for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late]]) {
   for (const zoom of [0, camera.ZOOMS.length - 1]) {           // the baked layer, and the live one
@@ -83,6 +89,9 @@ for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late]])
       ['idle', { hover: null }],
       ['hovering', { hover: { q: s.base.q, r: s.base.r } }],
       ['placing a building', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: 'forge' }],
+      // Mid-reel: every body and every blob is between hexes, so the two passes
+      // that take fractional coordinates are drawn as well as the integer ones.
+      ['mid-march', { hover: null, reel: {}, walk: midStride(s) }],
     ]) {
       frames.push({ label: `${label} · zoom ${zoom} · ${what}`, s, zoom, ui });
     }
@@ -167,7 +176,7 @@ t(`the map draws in every mode without throwing`, !threw,
 
   // A turn that moves somebody: the snapshot has to be taken before the resolve.
   putCrewOnFrontier(s);
-  const before = reel.snapshotCrew(s);
+  const before = reel.snapshotMovers(s);
   const events = resolveTurn(s);
   const r = reel.build(s, events, before);
 
@@ -194,7 +203,8 @@ t(`the map draws in every mode without throwing`, !threw,
         reel.controlsHtml(r);
         // sample the beat rather than run it out in real time
         for (let k = 0; k < 5; k++) {
-          if (reel.walkPositions(r)) frames++;
+          const at = reel.walkPositions(r);
+          if (at) frames += at.crew.size + at.cohorts.size;
           reel.tick(r, reel.beat(r).seconds / 4);
           if (r.done) break;
         }
@@ -208,18 +218,46 @@ t(`the map draws in every mode without throwing`, !threw,
     const w = r.beats.find((b) => b.kind === 'walk');
     if (w) {
       const r2 = reel.build(s, events, before);
-      const ends = w.movers.every((m) => {
+      const onOwnRoute = (list, side) => list.every((m) => {
         const first = m.path[0], last = m.path[m.path.length - 1];
         r2.t = 0;
-        const start = reel.walkPositions(r2).get(m.id);
+        const start = reel.walkPositions(r2)[side].get(m.id);
         r2.t = r2.beats[0].seconds;
-        const end = reel.walkPositions(r2).get(m.id);
+        const end = reel.walkPositions(r2)[side].get(m.id);
         return start.q === first.q && start.r === first.r && end.q === last.q && end.r === last.r;
       });
-      t('a walk starts where the body stood and ends where it stands now', ends,
-        `${w.movers.length} walking, longest ${Math.max(...w.movers.map((m) => m.path.length - 1))} steps`);
+      t('a walk starts where the mover stood and ends where it stands now',
+        onOwnRoute(w.movers, 'crew') && onOwnRoute(w.marchers, 'cohorts'),
+        `${w.movers.length} walking, ${w.marchers.length} marching`);
     }
   }
+}
+
+// A cohort released this turn was never in the snapshot — it was born at its
+// spawner and advanced in the same resolve — so its march has to start at the
+// mound rather than at wherever it ended up.
+{
+  const s = St.createState(20260816);
+  let checked = 0, wrong = 0;
+  for (let i = 0; i < 12 && !s.outcome; i++) {
+    const known = new Set(s.cohorts.map((c) => c.id));
+    const before = reel.snapshotMovers(s);
+    const events = resolveTurn(s);
+    const r = reel.build(s, events, before);
+    const walk = r && r.beats.find((b) => b.kind === 'walk');
+    for (const m of (walk ? walk.marchers : [])) {
+      if (known.has(m.id)) continue;                       // it was already marching
+      const c = s.cohorts.find((x) => x.id === m.id);
+      const sp = s.spawners.find((x) => x.id === c.spawnerId);
+      checked++;
+      if (m.path[0].q !== sp.q || m.path[0].r !== sp.r) wrong++;
+    }
+    if (s.combat) { skip(s); finishCombat(s); }
+    s.base.hull = C.HULL_MAX;
+    concludeTurn(s, events);
+  }
+  t('a cohort released this turn marches out of its own spawner', checked > 0 && wrong === 0,
+    `${checked} newly released, ${wrong} starting somewhere else`);
 }
 
 // All four beats over a run, rather than whichever two the sample turn happened
@@ -242,7 +280,7 @@ t(`the map draws in every mode without throwing`, !threw,
       if (site) driveRoadGang(s, site, 6);
       workFeatures(s, 2);
       putCrewOnFrontier(s);
-      const before = reel.snapshotCrew(s);
+      const before = reel.snapshotMovers(s);
       const events = resolveTurn(s);
       const r = reel.build(s, events, before);
       if (r) {

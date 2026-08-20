@@ -1,7 +1,7 @@
 // Canvas: map, structures, cohorts, units. Reads sim state, never writes it.
 
 import C from '../sim/config.js';
-import { key, distance, axialToPixel, spiral, neighbours } from '../sim/hex.js';
+import { key, distance, axialToPixel, axialRound, spiral, neighbours } from '../sim/hex.js';
 import { tileAt, towerRange, towerManning, roadNetwork, officerById, canopyShadow } from '../sim/state.js';
 import { queuedTiles, projectedAssignments, workableTiles } from '../sim/orders.js';
 import { clearCapacity } from '../sim/labour.js';
@@ -64,9 +64,13 @@ export function render(state, cam, canvas, ui) {
   }
   drawStructures(ctx, state, cam, canvas, S);
   drawSpawners(ctx, state, cam, canvas, S);
-  drawCohorts(ctx, state, cam, canvas, S);
+  drawCohorts(ctx, state, cam, canvas, S, ui);
   drawAssaults(ctx, state, cam, canvas, S);
-  if (state.combat) drawCombat(ctx, state, cam, canvas, S);
+  // Held back for as long as the reel runs. The contact has already happened in
+  // the sim, but in reel time the cohort is still walking to it — drawing the
+  // fight at the entry now would put its units on the road ahead of the blob
+  // that becomes them.
+  if (state.combat && !(ui && ui.reel)) drawCombat(ctx, state, cam, canvas, S);
   drawWorkedGround(ctx, state, cam, canvas, S);
   drawQueued(ctx, state, cam, canvas, S);
   drawBatchGlow(ctx, state, cam, canvas, S);
@@ -354,13 +358,20 @@ function drawSpawners(ctx, state, cam, canvas, S) {
   }
 }
 
-function drawCohorts(ctx, state, cam, canvas, S) {
+function drawCohorts(ctx, state, cam, canvas, S, ui) {
+  const walk = ui && ui.walk && ui.walk.cohorts;
   for (const m of state.cohorts) {
-    const tiles = cohortTiles(state, m);
+    // Mid-march the blob is centred between hexes, so its own tiles come out
+    // fractional and the map can no longer be asked whether it holds them. The
+    // hex each one rounds to is what gets asked instead, which keeps the shape
+    // clipped to the island rather than dropping every tile of it.
+    const at = walk && walk.get(m.id);
+    const tiles = cohortTiles(state, at ? { ...m, q: at.q, r: at.r } : m);
     ctx.fillStyle = 'rgba(200,60,50,0.32)';
     ctx.beginPath();
     for (const t of tiles) {
-      if (!state.map.tiles.has(key(t.q, t.r))) continue;
+      const h = at ? axialRound(t.q, t.r) : t;
+      if (!state.map.tiles.has(key(h.q, h.r))) continue;
       const p = axialToScreen(cam, canvas, t.q, t.r);
       hexPath(ctx, p.x, p.y, S);
     }
@@ -370,7 +381,7 @@ function drawCohorts(ctx, state, cam, canvas, S) {
     ctx.stroke();
 
     if (S >= 8) {
-      const p = axialToScreen(cam, canvas, m.q, m.r);
+      const p = axialToScreen(cam, canvas, at ? at.q : m.q, at ? at.r : m.r);
       ctx.fillStyle = '#fff';
       ctx.font = `bold ${Math.round(S * 0.9)}px monospace`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -580,7 +591,7 @@ function dotSpots(n, S) {
  */
 function drawCrew(ctx, state, cam, canvas, S, ui) {
   if (S < 5) return;
-  if (ui && ui.walk) return drawWalkers(ctx, state, cam, canvas, S, ui.walk);
+  if (ui && ui.walk) return drawWalkers(ctx, state, cam, canvas, S, ui.walk.crew);
   const byTile = new Map();
   const jobOf = new Map();
   for (const a of state.crew.assignments) {
