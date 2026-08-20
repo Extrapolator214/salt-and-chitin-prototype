@@ -38,9 +38,18 @@ export const CASTAWAY = art(`
     ~~~~~~~~~~~~~~~~~~~~~~~
 `);
 
-const POI = { wreck: WRECK, cache: CACHE, officer: CASTAWAY };
+export const SPRING = art(`
+              ,
+             /|\\
+            ( o )
+       .-~~~~~~~~~-.
+      (  ~   ~   ~  )
+       '-.._______..-'
+`);
 
-/** The picture for a worked site, or the chest as a stand-in for a new kind. */
+const POI = { wreck: WRECK, cache: CACHE, officer: CASTAWAY, spring: SPRING };
+
+/** The picture for a site, or the chest as a stand-in for a kind with no art. */
 export const forFeature = (kind) => POI[kind] || CACHE;
 
 // ---- the two fronts --------------------------------------------------------

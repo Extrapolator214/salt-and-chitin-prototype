@@ -17,6 +17,7 @@ import { evolutionPartners } from '../sim/build.js';
 import { clearCapacity, nearestIdle, pickNearest, crewRoute, jobPlace } from '../sim/labour.js';
 import { outcomeText } from '../sim/turn.js';
 import { roadReaches } from '../sim/enemy.js';
+import * as art from './ascii.js';
 
 let current = null;
 
@@ -468,45 +469,35 @@ const VIEWS = {
     // One face, one worker. While someone has it, there is nothing to offer —
     // stand them down above and the choices come back.
     if (!already.length) {
-      const canCut = t && isClearable(state, t);
-      if (canCut) {
-        h += '<h3>put someone on it</h3><table>';
-        for (const w of workerChoices(state, { q, r })) {
-          const order = { type: 'assignClear', who: w.id, target: { q, r } };
-          const can = O.canEnqueue(state, order);
-          h += row([w.label, 'clears it', walkText(state, w, { q, r }), '',
-            btn('Assign', 'orderClose', order, !can.ok)], !can.ok, can.ok ? '' : can.why);
-        }
-        h += '</table>';
-        h += '<p class="note">A worker cuts this one tile and is free again, standing where the work left them.</p>';
-      }
+      // Ground still shut over whatever is under it. This used to be a second
+      // table with a row per worker and "clear the tile first" written against
+      // every one of them — a grid of refusals saying one thing. It is one
+      // thing, so it is said once, and the picture says the rest.
+      if (t && t.feature && !t.featureWorked && isClearable(state, t)) h += buriedNote(t);
 
-      // whatever the ground was hiding is its own job, once the ground is open
-      const action = t && t.feature && !t.featureWorked ? C.featureAction(t.feature) : null;
-      if (action) {
-        h += `<h3>${esc(action)} the ${esc(featureWord(t.feature))}</h3><table>`;
-        for (const w of workerChoices(state, { q, r })) {
-          const order = { type: 'workFeature', who: w.id, target: { q, r } };
-          const can = O.canEnqueue(state, order);
-          h += row([w.label, "one turn's work", featurePrize(t.feature),
-            walkText(state, w, { q, r }),
-            btn(action === 'save' ? 'Save' : action === 'dig up' ? 'Dig' : 'Search', 'orderClose', order, !can.ok)],
-          !can.ok, can.ok ? '' : can.why);
-        }
-        h += '</table>';
+      // Who can be sent, how far they walk, when the work starts, and what they
+      // can actually do here. One table: the choice is which body, and every
+      // job this tile offers is a button on that body's row.
+      const rows = [];
+      for (const w of workerChoices(state, { q, r })) {
+        const jobs = tileJobs(state, t, { q, r });
+        if (!jobs.length) break;                       // nothing on offer to anybody
+        const buttons = jobs.map((j) => {
+          const can = O.canEnqueue(state, { ...j.order, who: w.id });
+          return { html: btn(j.label, 'orderClose', { ...j.order, who: w.id }, !can.ok), can };
+        });
+        const walk = walkCells(state, w, { q, r });
+        const off = buttons.every((b) => !b.can.ok);
+        const why = off ? (buttons.find((b) => b.can.why) || {}).can.why : '';
+        rows.push(row([w.label, walk.far, walk.when, buttons.map((b) => b.html).join(' ')], off, why));
       }
-      if (t && t.feature === 'spring' && !t.featureWorked) {
-        h += '<h3>hold the spring</h3><table>';
-        for (const w of workerChoices(state, { q, r })) {
-          const order = { type: 'assignGarrison', who: w.id, target: { q, r } };
-          const can = O.canEnqueue(state, order);
-          h += row([w.label, 'stands on the spring', `+${C.FEATURES.spring.handsCap} hands cap while held`,
-            walkText(state, w, { q, r }),
-            btn('Station', 'orderClose', order, !can.ok)], !can.ok, can.ok ? '' : can.why);
-        }
-        h += '</table>';
+      if (rows.length) {
+        h += '<table><tr><th>who</th><th>distance</th><th>work starts</th><th></th><th></th></tr>'
+          + rows.join('') + '</table>';
+        h += '<p class="note">A worker takes one job and is free again, standing where the work left them.</p>';
       }
     }
+
     // ground with nothing on it and nothing to cut: say so rather than show a
     // box with nothing in it
     if (!already.length && !(t && isClearable(state, t)) && !(t && t.feature && !t.featureWorked)
@@ -724,6 +715,71 @@ function walkRank(state, w, to) {
   return walk.turns * 1000 + walk.tiles;
 }
 
+/**
+ * Every job this tile has on offer, whoever ends up taking it.
+ *
+ * A point of interest is only offered once the ground over it is open. Under
+ * standing forest it is not a job that is merely refused — there is nothing to
+ * dig at yet — so it is described rather than listed, and `buriedNote` does
+ * that once instead of a table doing it once per worker.
+ */
+function tileJobs(state, t, at) {
+  if (!t) return [];
+  const jobs = [];
+  if (isClearable(state, t)) {
+    jobs.push({ label: 'clear tile', order: { type: 'assignClear', target: { q: at.q, r: at.r } } });
+  }
+  const open = t.feature && !t.featureWorked && !isClearable(state, t);
+  const action = open ? C.featureAction(t.feature) : null;
+  if (action) {
+    jobs.push({ label: `${action} the ${featureWord(t.feature)}`, order: { type: 'workFeature', target: { q: at.q, r: at.r } } });
+  }
+  // The spring is held, not worked: nobody finishes with it, and it pays only
+  // for as long as somebody is standing there.
+  if (open && t.feature === 'spring') {
+    jobs.push({ label: 'hold the spring', order: { type: 'assignGarrison', target: { q: at.q, r: at.r } } });
+  }
+  return jobs;
+}
+
+/**
+ * What lies under ground that is still shut, as prose and a picture.
+ *
+ * The picture is the reel's own, which is the point: the same chest you will be
+ * shown being dug up is the one you are being told is down there.
+ */
+function buriedNote(t) {
+  const kind = t.feature;
+  const prize = featurePrize(kind);
+  const action = C.featureAction(kind);
+  const what = `There is a ${featureWord(kind)} under this ground`
+    + (prize ? ` — ${prize}` : '') + '.';
+  const then = action
+    ? `Cut the tile first. Working it is a turn of its own after that, and one worker does both.`
+    : `Cut the tile first. It is held rather than worked: a body standing on it raises the hand cap by ${C.FEATURES.spring.handsCap}, and only while they stand there.`;
+  return `<pre class="art">${esc(art.forFeature(kind))}</pre>`
+    + `<p class="note">${esc(what)} ${esc(then)}</p>`;
+}
+
+/**
+ * The walk, split into the two questions a player actually asks: how far away
+ * is the body, and when does the work start. They were one sentence, which read
+ * fine on its own and could not be scanned down a column against four others.
+ */
+function walkCells(state, w, to) {
+  const walk = walkFor(state, w, to);
+  if (!walk) return { far: '<span class="dim">nobody to send</span>', when: '' };
+  if (!walk.reachable) return { far: '<span class="bad">cannot get to it</span>', when: '' };
+  if (walk.sameTrip) return { far: 'the same trip', when: 'this turn' };
+  if (walk.tiles === 0) return { far: 'standing on it', when: 'this turn' };
+  const far = `${walk.tiles} tile${walk.tiles === 1 ? '' : 's'} away`;
+  return {
+    far,
+    when: walk.turns === 0 ? 'this turn'
+      : `after ${walk.turns} turn${walk.turns === 1 ? '' : 's'} walking`,
+  };
+}
+
 const FEATURE_WORD = { cache: 'chest', wreck: 'wreck', officer: 'castaway', spring: 'spring' };
 const featureWord = (kind) => FEATURE_WORD[kind] || kind;
 
@@ -732,24 +788,6 @@ function featurePrize(kind) {
   if (kind === 'cache') return `${C.FEATURES.cache.gold} gold`;
   if (kind === 'officer') return 'a fifth officer joins the company';
   return '';
-}
-
-/**
- * What the walk to this job costs whoever would take it. A labour officer's
- * extra faces are free only where they touch a tile he is already going to —
- * anywhere else is a walk like anyone else's.
- */
-function walkText(state, w, to) {
-  const walk = walkFor(state, w, to);
-  if (!walk) return '';
-  // the row's own refusal, beside the tile's: `canEnqueue` says "no way to walk
-  // there" when *nobody* can get to it, and this says which of them cannot
-  if (!walk.reachable) return '<span class="bad">cannot get to it</span>';
-  if (walk.sameTrip) return 'free — the same trip';
-  if (walk.tiles === 0) return 'standing on it — work starts this turn';
-  const far = `${walk.tiles} tile${walk.tiles === 1 ? '' : 's'} away`;
-  return walk.turns === 0 ? `${far} — 0 turns, work starts this turn`
-    : `${far} — ${walk.turns} turn${walk.turns === 1 ? '' : 's'} walking before the work`;
 }
 
 function manTargetName(state, id) {

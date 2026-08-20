@@ -137,6 +137,9 @@ button {
   font: inherit; color: var(--text);
   background: var(--panel); border: 1px solid var(--edge);
   padding: 3px 9px; cursor: pointer;
+  /* A label is the name of the thing the button does; broken over two lines it
+     stops being one. Table cells are narrow enough to do that without this. */
+  white-space: nowrap;
 }
 button:hover:not(:disabled) { background: #262a31; }
 /* Same box as a button, so the seed field reads as part of the same row rather
@@ -164,7 +167,7 @@ kbd { color: var(--dim); font-size: 11px; }
 #modal h3 { margin: 14px 0 4px; font-size: 13px; color: var(--dim); }
 #modal table { border-collapse: collapse; width: 100%; }
 #modal th, #modal td { text-align: left; padding: 3px 8px 3px 0; border-bottom: 1px solid #23262c; vertical-align: top; }
-#modal th { color: var(--dim); font-weight: normal; }
+#modal th { color: var(--dim); font-weight: normal; white-space: nowrap; }
 #modal tr.off td { color: #6a6e75; }
 #modal .why { color: var(--bad); }
 #modal .close { float: right; }
@@ -235,12 +238,16 @@ kbd { color: var(--dim); font-size: 11px; }
 #splash-pane b { color: #fff; }
 
 /* The art is a grid, not a paragraph: it must not wrap, inherit the body's
-   line height, or be re-flowed by the panel getting narrower. */
-#splash-pane .art {
-  margin: 0; white-space: pre; line-height: 1.15;
+   line height, or be re-flowed by its box getting narrower. Shared, because the
+   same pictures are used by the reel's splashes and by the tile panel — a chest
+   drawn one way on the splash and another in the modal would read as two
+   different chests. */
+.art {
+  margin: 8px 0; white-space: pre; line-height: 1.15;
   color: var(--warn); overflow-x: auto;
 }
-#splash-pane .art.bad { color: var(--bad); }
+.art.bad { color: var(--bad); }
+#splash-pane .art { margin: 0; }
 
 /* Equal columns, whatever each one holds — two spawners of different silhouette
    heights should still share the width down the middle. */
