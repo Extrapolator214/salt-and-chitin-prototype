@@ -81,6 +81,26 @@ html, body {
 .panel { padding: 6px 8px; overflow: auto; }
 #hover { flex: 1 1 60%; border-bottom: 1px solid var(--edge); white-space: pre-wrap; }
 #queue { flex: 1 1 40%; }
+/* Bottom of the column, above the action row that carries End Turn, and sized
+   by its own contents so it never takes room off the queue. */
+#reel-panel {
+  flex: none; overflow: visible;
+  border-top: 1px solid var(--edge);
+}
+#reel-panel h3 {
+  margin: 0 0 2px; font-size: 13px; font-weight: normal;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--text);
+}
+#reel-panel .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+#reel-panel .row .k { color: var(--dim); }
+#reel-panel .row .gap { flex: 1; }
+#reel-panel button { padding: 1px 8px; line-height: 1.4; }
+#reel-panel button.on { background: #2f3742; color: #fff; }
+#reel-panel .beat { color: var(--dim); }
+#reel-panel .beat b { color: var(--text); font-weight: normal; }
+/* Time left in the beat. Only its width is written per frame. */
+#reel-bar { height: 2px; background: var(--edge); margin-top: 6px; }
+#reel-bar > i { display: block; height: 100%; background: var(--warn); width: 100%; }
 
 /* Last in the column, so it sits on the bottom of the screen whatever else is
    on it: the buttons are the one thing the player reaches for every turn, and
@@ -186,16 +206,21 @@ kbd { color: var(--dim); font-size: 11px; }
    the same slab as a modal, because it is the same kind of object: something
    that has interrupted you and will go away. */
 #splash {
-  position: fixed; inset: 0; z-index: 12;
+  /* Stops at the side column rather than covering the screen: the reel's own
+     controls live over there and have to stay lit and reachable while a splash
+     is up. The 370px matches #side exactly.
+
+     Nothing on the splash is clickable, so the whole layer lets pointer events
+     through — the map underneath is made inert in main.js, not here. */
+  position: fixed; left: 0; top: 0; bottom: 0; right: 370px; z-index: 12;
   display: flex; align-items: center; justify-content: center;
   background: rgba(8, 9, 11, 0.55);
-  /* Clicks fall through to nothing — the map is not interactive mid-resolve —
-     but the panel below re-enables them for its own buttons. */
   pointer-events: none;
 }
 #splash[hidden] { display: none; }
 #splash-pane {
-  pointer-events: auto;
+  /* Nothing on the pane is clickable any more — every control moved to the side
+     panel — so it does not take pointer events back off the overlay. */
   background: var(--panel); border: 1px solid var(--edge);
   padding: 14px 18px 10px; min-width: 520px; max-width: 90vw;
   max-height: 88vh; overflow-y: auto; overflow-x: hidden;
@@ -226,14 +251,4 @@ kbd { color: var(--dim); font-size: 11px; }
 .reel-arrow { color: var(--dim); text-align: center; line-height: 1.1; }
 .reel-col .bar { color: var(--bad); letter-spacing: .12em; }
 
-.reel-controls {
-  display: flex; gap: 6px; align-items: center;
-  margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--edge);
-}
-.reel-controls .dim { flex: 1; }
-.reel-controls button.on { background: #2f3742; color: #fff; }
 
-/* Time left in the beat, as a line that drains. Only its width is written per
-   frame — the splash's markup itself is built once, when the beat changes. */
-#splash-bar { height: 2px; background: var(--edge); margin: 10px 0 0; }
-#splash-bar > i { display: block; height: 100%; background: var(--warn); width: 100%; }

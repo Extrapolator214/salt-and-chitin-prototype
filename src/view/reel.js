@@ -341,14 +341,39 @@ export function paneHtml(reel) {
   return null;
 }
 
-/** The line of controls, the same three the contact strip has always had. */
-export function controlsHtml(reel) {
-  const on = (s) => (reel.speed === s ? ' class="on"' : '');
-  return '<div class="reel-controls">'
-    + `<span class="dim">${reel.i + 1} / ${reel.beats.length}</span>`
+/** What the beat on screen is, in the panel's own words. */
+const BEAT_LABEL = {
+  walk: 'the island moves',
+  poi: 'a site is worked',
+  breed: 'the island breeds',
+  release: 'cohorts released',
+};
+
+/**
+ * The panel in the side column: what is playing, how far through it is, and the
+ * controls.
+ *
+ * Rendered whether or not a reel is running, because the speed is a standing
+ * preference and not only a control — a player who has settled on 3x has
+ * settled on it for the run, and a control that only exists while it is being
+ * used cannot be set in advance.
+ */
+export function panelHtml(reel, speed) {
+  const on = (s) => (s === speed ? ' class="on"' : '');
+  const b = reel && beat(reel);
+  const controls = '<div class="row">'
+    + '<span class="k">speed</span>'
     + `<button data-r="1"${on(1)}>1x</button>`
     + `<button data-r="3"${on(3)}>3x</button>`
-    + '<button data-r="next">next</button>'
-    + '<button data-r="skip">skip</button>'
+    + '<span class="gap"></span>'
+    + `<button data-r="next"${b ? '' : ' disabled'}>next</button>`
+    + `<button data-r="skip"${b ? '' : ' disabled'}>skip</button>`
     + '</div>';
+
+  const line = b
+    ? `<div class="beat"><b>${esc(BEAT_LABEL[b.kind] || b.kind)}</b> · ${reel.i + 1} of ${reel.beats.length}</div>`
+    : '<div class="beat">plays when the turn ends</div>';
+
+  return '<h3>Resolve turn animation</h3>' + line + controls
+    + (b ? '<div id="reel-bar"><i></i></div>' : '');
 }

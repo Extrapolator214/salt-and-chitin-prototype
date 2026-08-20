@@ -200,7 +200,7 @@ t(`the map draws in every mode without throwing`, !threw,
       while (!r.done) {
         const html = reel.paneHtml(r);
         if (html) panes++;
-        reel.controlsHtml(r);
+        reel.panelHtml(r, 1);
         // sample the beat rather than run it out in real time
         for (let k = 0; k < 5; k++) {
           const at = reel.walkPositions(r);
@@ -309,6 +309,13 @@ t(`the map draws in every mode without throwing`, !threw,
       panes.push(reel.paneHtml(fake));
     }
   } catch (e) { err = e.message; }
+  t('the panel renders with nothing playing, and offers no next or skip',
+    (() => {
+      const idle = reel.panelHtml(null, 3);
+      return idle.includes('Resolve turn animation') && idle.includes('data-r="3" class="on"')
+        && (idle.match(/disabled/g) || []).length === 2 && !idle.includes('reel-bar');
+    })(), 'idle panel');
+
   t('every point of interest has a splash, including an unknown one',
     !err && panes.length === 4 && panes.every((p) => p && p.includes('<pre')),
     err || `${panes.length} panes drawn`);

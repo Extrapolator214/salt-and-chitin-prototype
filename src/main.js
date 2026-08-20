@@ -27,6 +27,7 @@ const backdrop = document.getElementById('backdrop');
 const strip = document.getElementById('combat-strip');
 const splash = document.getElementById('splash');
 const splashPane = document.getElementById('splash-pane');
+const reelPanel = document.getElementById('reel-panel');
 
 const params = new URLSearchParams(location.search);
 const seedFromUrl = Number(params.get('seed'));
@@ -38,7 +39,9 @@ const ui = {
   placing: null,       // a building type following the cursor
   pendingEvents: [],
   reel: null,          // the resolve being played back, or null between turns
-  walk: null,          // mid-stride crew positions, set only during a walk beat
+  walk: null,          // mid-stride positions, set only during a walk beat
+  // A setting rather than a per-reel control: chosen once and kept for the run.
+  reelSpeed: 1,
   revoke: (id) => { O.revoke(state, id); refresh(); },
   place: (building) => { ui.placing = building; refresh(); },
   order: (o) => { const r = O.enqueue(state, o); if (!r.ok) flash(r.why); return r; },
@@ -93,6 +96,7 @@ function refresh() {
   renderQueue();
   renderLog(state, logEl);
   modals.renderModal(state, modalEl, backdrop, ui);
+  renderReelPanel();
   document.getElementById('endturn').disabled = state.phase !== 'player';
 
   const spare = O.projectedHands(state) + O.projectedIdleOfficers(state).length;
@@ -158,6 +162,7 @@ function endTurn(confirmed = false) {
 
   ui.reel = reel.build(state, ui.pendingEvents, before);
   if (ui.reel) {
+    ui.reel.speed = ui.reelSpeed;
     camBeforeReel = { x: cam.x, y: cam.y };
     showBeat();
     refresh();
@@ -199,24 +204,41 @@ function endReel() {
 }
 
 /**
- * Draw the current beat's splash. Called when the beat changes, not per frame —
- * the walk beat has no splash at all, which is what hides the panel for it.
+ * Draw the current beat: its splash, if it has one, and the side panel either
+ * way. Called when the beat changes, not per frame — the walk has no picture at
+ * all, which is what puts the map back on screen for it.
  */
 function showBeat() {
   const r = ui.reel;
   if (!r) return;
   r.dirty = false;
   const pane = reel.paneHtml(r);
-  if (!pane) { splash.hidden = true; return; }
-  splash.hidden = false;
-  splashPane.innerHTML = pane + reel.controlsHtml(r) + '<div id="splash-bar"><i></i></div>';
-  splashPane.querySelectorAll('[data-r]').forEach((b) => {
+  splash.hidden = !pane;
+  if (pane) splashPane.innerHTML = pane;
+  renderReelPanel();
+}
+
+/**
+ * The reel's panel in the side column, drawn whether or not one is playing.
+ *
+ * It sits outside the splash on purpose: the splash stops at the side column,
+ * so these buttons stay lit and clickable through a pane, and the speed can be
+ * set on a quiet turn rather than only while something is already running.
+ */
+function renderReelPanel() {
+  reelPanel.innerHTML = reel.panelHtml(ui.reel, ui.reelSpeed);
+  reelPanel.querySelectorAll('[data-r]').forEach((b) => {
     b.onclick = () => {
       const v = b.dataset.r;
       if (v === 'skip') return skipReel();
-      if (v === 'next') { reel.next(r); return r.done ? afterReel() : showBeat(); }
-      r.speed = Number(v);
-      showBeat();                                      // repaint the pressed state
+      if (v === 'next') {
+        if (!ui.reel) return;
+        reel.next(ui.reel);
+        return ui.reel.done ? afterReel() : showBeat();
+      }
+      ui.reelSpeed = Number(v);
+      if (ui.reel) ui.reel.speed = ui.reelSpeed;
+      renderReelPanel();                               // repaint the pressed state
     };
   });
 }
@@ -237,7 +259,7 @@ function tickReel(dt) {
   if (done) return afterReel();
   if (r.dirty) return showBeat();
   const b = reel.beat(r);
-  const bar = splashPane.querySelector('#splash-bar > i');
+  const bar = reelPanel.querySelector('#reel-bar > i');
   if (bar && b) bar.style.width = `${Math.max(0, 100 - (r.t / b.seconds) * 100)}%`;
 }
 
@@ -398,6 +420,7 @@ hudEl.addEventListener('click', (e) => {
 });
 
 document.getElementById('actions').addEventListener('click', (e) => {
+  if (ui.reel) return;                 // nothing on the row acts mid-resolve
   const action = e.target.dataset && e.target.dataset.action;
   if (!action) return;
   ui.placing = null;
