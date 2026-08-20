@@ -55,7 +55,7 @@ globalThis.document = globalThis.document || {
   createElement: (tag) => (tag === 'canvas' ? stubCanvas(64, 64).canvas : { style: {} }),
 };
 
-const { render } = await import('../src/view/render.js');
+const { render, jobLines } = await import('../src/view/render.js');
 const { renderHud } = await import('../src/view/hud.js');
 const { renderHover } = await import('../src/view/hover.js');
 const camera = await import('../src/view/camera.js');
@@ -261,6 +261,67 @@ t(`the map draws in every mode without throwing`, !threw,
   still.x = 12; still.y = 34;
   reel.glide(still, null, 1 / 60);
   t('a camera with nowhere to go does not drift', still.x === 12 && still.y === 34, 'held still');
+}
+
+// The line from a body to the tile it is bound for. Pinned without a pixel,
+// because the hard half is not the drawing — it is knowing which body walks an
+// order that is still in the queue and so has no assignment behind it yet.
+{
+  const s = St.createState(20260816);
+  const spot = O.workableTiles(s).slice().sort((a, b) => H.distance(b, s.base) - H.distance(a, s.base))[0];
+  const before = jobLines(s).size;
+  const res = O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: spot.q, r: spot.r } });
+  const order = s.orders[s.orders.length - 1];
+  const who = O.projectedCrew(s, O.crewGroundAtResolve(s)).byOrder.get(order.id);
+  const lines = jobLines(s);
+  const drawn = who && lines.get(who);
+
+  t('a queued order draws a line from the body that will actually walk it',
+    res.ok && !!who && !!drawn && drawn.q === spot.q && drawn.r === spot.r && lines.size === before + 1,
+    `${who} -> (${spot.q},${spot.r}), ${before} lines before, ${lines.size} after`);
+
+  // The queue panel names a body beside the row; the line must be to the same
+  // one, or the map and the panel disagree about who is going where.
+  t('the line and the queue row name the same body',
+    who === O.projectedCrew(s, O.crewGroundAtResolve(s)).byOrder.get(order.id), String(who));
+
+  // The case the arrival turn gets wrong. `arrivesOnTurn` reads as "this turn"
+  // for the whole of the turn the walk ends on, so a body six tiles short of its
+  // job is described as arriving — and a line drawn off that number is not drawn
+  // at all. What settles it is where the body is standing.
+  {
+    const s3 = St.createState(20260816);
+    const site = [...s3.map.tiles.values()]
+      .find((x) => x.feature === 'wreck' && !x.featureWorked && !St.isClearable(s3, x));
+    for (const p2 of H.line(s3.base, site)) {          // open a road out to it
+      const tile = St.tileAt(s3, p2.q, p2.r);
+      if (!tile || tile.occupant || tile === site) continue;
+      if (tile.terrain === 'saltwater') tile.terrain = 'sand';
+      if (!tile.cleared) { tile.cleared = true; tile.terrain = 'road'; }
+    }
+    St.touchMap(s3);
+    O.enqueue(s3, { type: 'workFeature', who: 'hand', target: { q: site.q, r: site.r } });
+    const ev = resolveTurn(s3);                         // the order becomes an assignment
+    concludeTurn(s3, ev);
+
+    const a = s3.crew.assignments.find((x) => x.kind === 'feature');
+    const body = St.memberById(s3, a.who);
+    const short = H.distance(body, site);
+    const line = jobLines(s3).get(a.who);
+    t('a body short of its job is joined to it even when it "arrives this turn"',
+      short > 0 && a.arrivesOnTurn <= s3.turn && !!line && line.q === site.q && line.r === site.r,
+      `${a.who} is ${short} tiles short, arrivesOnTurn ${a.arrivesOnTurn} against turn ${s3.turn}`);
+  }
+
+  // A body already standing on its own target has nowhere to be drawn to.
+  const s2 = St.createState(20260816);
+  const m2 = s2.crew.members[0];
+  const face = O.workableTiles(s2).sort((a, b) => H.distance(a, m2) - H.distance(b, m2))[0];
+  m2.q = face.q; m2.r = face.r;                       // stand him on the job
+  O.enqueue(s2, { type: 'assignClear', who: m2.id, target: { q: face.q, r: face.r } });
+  t('a body standing on its own target is joined to nothing',
+    !jobLines(s2).has(m2.id),
+    `${m2.id} stands on (${face.q},${face.r}) and is ordered to cut it`);
 }
 
 // A site the resolve has worked is off the map before the reel starts — the sim

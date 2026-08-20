@@ -3,8 +3,8 @@
 import C from '../sim/config.js';
 import { key, distance, axialToPixel, axialRound, spiral, neighbours } from '../sim/hex.js';
 import { tileAt, towerRange, towerManning, roadNetwork, officerById, canopyShadow } from '../sim/state.js';
-import { queuedTiles, projectedAssignments, workableTiles } from '../sim/orders.js';
-import { clearCapacity } from '../sim/labour.js';
+import { queuedTiles, projectedAssignments, workableTiles, projectedCrew, crewGroundAtResolve } from '../sim/orders.js';
+import { clearCapacity, jobPlace } from '../sim/labour.js';
 import { canBuildBuilding, footprintPreview } from '../sim/build.js';
 import { cohortTiles, cohortHidden } from '../sim/enemy.js';
 import { hexSize, axialToScreen, visibleRows, worldToScreen } from './camera.js';
@@ -633,22 +633,75 @@ function dotSpots(n, S) {
   return out;
 }
 
+const EMPTY = new Map();
+
+// Same key as the batch glow: version, turn, both counts and `state.ids`, which
+// is what catches a revoke-and-requeue that leaves every count where it was.
+const projectionKey = (state) =>
+  `${state.map.version}|${state.turn}|${state.orders.length}|${state.crew.assignments.length}|${state.ids}`;
+
+let lineCache = { key: null, map: EMPTY };
+
+/**
+ * Who is bound for a tile they are not standing on, and which tile.
+ *
+ * The test is where the body actually is, not what the arrival turn says. An
+ * assignment's `arrivesOnTurn` is a statement about the coming resolve rather
+ * than about now — it reads as "this turn" for the whole of the turn the walk
+ * finishes on, because movement runs before the labour and the arrival turn is
+ * a working turn. Trusting it drew no line for an officer plainly six tiles
+ * short of his job. `taskState` refuses it for the same reason.
+ *
+ * Queued orders and assignments under way are taken from one list, because to
+ * the eye they are the same thing: somebody is going somewhere. Which body
+ * walks a queued order is only known by asking the projection — the same answer
+ * the queue panel prints beside the row, so the line and the row agree.
+ *
+ * One line per body. An officer cutting a batch has several faces queued and
+ * would otherwise sprout a line to each; the batch glow already shows the rest
+ * of his ground, and a fan of lines out of one dot reads as confusion rather
+ * than as information.
+ *
+ * Cached, because it asks the projection — which walks the crew's reachable
+ * ground — and this is called every frame.
+ */
+export function jobLines(state) {
+  const k = projectionKey(state);
+  if (lineCache.key === k) return lineCache.map;
+  const out = new Map();
+  const { byOrder } = projectedCrew(state, crewGroundAtResolve(state));
+  for (const a of projectedAssignments(state)) {
+    if (a.kind === 'assault') continue;               // away with the team
+    const who = a.queued ? byOrder.get(a.id) : a.who;
+    if (!who || out.has(who)) continue;
+    const to = jobPlace(state, a);
+    if (!to) continue;
+    const m = state.crew.members.find((x) => x.id === who);
+    if (!m || (m.q === to.q && m.r === to.r)) continue;   // already standing on it
+    out.set(who, to);
+  }
+  lineCache = { key: k, map: out };
+  return out;
+}
+
 /**
  * Every body on the island, standing where they are. Hands are bone, officers
- * are blue and a shade larger; anyone still walking to a job is joined to it by
- * a thin line, so a turn spent on the road is visible.
+ * are blue and a shade larger; anyone bound for a tile they have not reached is
+ * joined to it by a thin line, so an outline on a far tile also says who is
+ * going to it.
  */
 function drawCrew(ctx, state, cam, canvas, S, ui) {
   if (S < 5) return;
   if (ui && ui.walk) return drawWalkers(ctx, state, cam, canvas, S, ui.walk.crew);
   const byTile = new Map();
-  const jobOf = new Map();
-  for (const a of state.crew.assignments) {
-    if (a.arrivesOnTurn > state.turn && a.target && a.target.q !== undefined) jobOf.set(a.who, a.target);
-    if (a.kind === 'assault') jobOf.set(a.who, null); // away with the team
-  }
+  const away = new Set();
+  for (const a of state.crew.assignments) if (a.kind === 'assault') away.add(a.who);
+  // Only while the player has the turn. During a resolve the bodies are moving
+  // and the lines would be drawn to ground they are halfway across; the reel
+  // draws no lines at all, and this is the other half of that rule.
+  const lines = state.phase === 'player' ? jobLines(state) : EMPTY;
   for (const m of state.crew.members) {
-    if (jobOf.get(m.id) === null) continue;
+    if (away.has(m.id)) continue;
     const k = `${m.q},${m.r}`;
     let list = byTile.get(k);
     if (!list) byTile.set(k, (list = []));
@@ -664,15 +717,22 @@ function drawCrew(ctx, state, cam, canvas, S, ui) {
     const spots = dotSpots(list.length, S);
     list.forEach((m, i) => {
       const [dx, dy] = spots[Math.min(i, spots.length - 1)];
-      const walking = jobOf.get(m.id);
-      if (walking) {
-        const to = axialToScreen(cam, canvas, walking.q, walking.r);
-        ctx.strokeStyle = 'rgba(220, 226, 236, 0.30)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
+      const bound = lines.get(m.id);
+      if (bound) {
+        const to = axialToScreen(cam, canvas, bound.q, bound.r);
+        // Drawn twice: a dark backing under a light hairline. One faint stroke
+        // was legible over forest and invisible over sand and salt, which is
+        // exactly the ground a long line crosses — and a line you cannot follow
+        // to its end is not telling you where anybody is going.
+        ctx.setLineDash([4, 4]);
         ctx.beginPath();
         ctx.moveTo(p.x + dx, p.y + dy);
         ctx.lineTo(to.x, to.y);
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(10, 13, 18, 0.45)';
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(236, 242, 252, 0.8)';
         ctx.stroke();
         ctx.setLineDash([]);
       }
