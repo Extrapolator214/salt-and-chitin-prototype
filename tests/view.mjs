@@ -94,6 +94,9 @@ for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late]])
       ['mid-march', { hover: null, reel: {}, walk: midStride(s) }],
       ['a located tile, with the pointer elsewhere',
         { hover: { q: s.base.q + 2, r: s.base.r }, located: { q: s.base.q - 4, r: s.base.r + 1 } }],
+      ['a site held on screen until its pane has played',
+        { hover: null, reel: {}, revealing: [{ q: s.base.q - 2, r: s.base.r, feature: 'cache' },
+          { q: s.base.q + 1, r: s.base.r - 2, feature: 'nonesuch' }] }],
     ]) {
       frames.push({ label: `${label} · zoom ${zoom} · ${what}`, s, zoom, ui });
     }
@@ -258,6 +261,38 @@ t(`the map draws in every mode without throwing`, !threw,
   still.x = 12; still.y = 34;
   reel.glide(still, null, 1 / 60);
   t('a camera with nowhere to go does not drift', still.x === 12 && still.y === 34, 'held still');
+}
+
+// A site the resolve has worked is off the map before the reel starts — the sim
+// set featureWorked and touchMap re-baked the ground without it. The reel holds
+// the marker until its own pane has been and gone, or the player watches a body
+// walk to a bare tile and is told afterwards what was on it.
+{
+  const beats = [
+    { kind: 'walk', movers: [], marchers: [], focus: null, seconds: 1 },
+    { kind: 'poi', feature: 'cache', focus: { q: 3, r: 4 }, seconds: 1 },
+    { kind: 'poi', feature: 'wreck', focus: { q: 9, r: -2 }, seconds: 1 },
+    { kind: 'breed', spawners: [], focus: null, seconds: 1 },
+  ];
+  const r = { beats, i: 0, t: 0, speed: 1, done: false };
+  const at = () => (reel.pending(r) || []).map((f) => `${f.feature}@${f.q},${f.r}`).join(' ');
+
+  const onWalk = at();
+  reel.next(r);                                   // onto the chest's own pane
+  const onChest = at();
+  reel.next(r);                                   // past it, onto the wreck's
+  const onWreck = at();
+  reel.next(r);                                   // past both
+  const onBreed = at();
+
+  t('a worked site stays on the map until its own pane has played',
+    onWalk === 'cache@3,4 wreck@9,-2' && onChest === 'cache@3,4 wreck@9,-2'
+    && onWreck === 'wreck@9,-2' && onBreed === '',
+    `walk[${onWalk}] chest[${onChest}] wreck[${onWreck}] breed[${onBreed}]`);
+
+  reel.skip(r);
+  t('and nothing is held once the reel is over', reel.pending(r) === null && reel.pending(null) === null,
+    'cleared');
 }
 
 // A cohort released this turn was never in the snapshot — it was born at its

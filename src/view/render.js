@@ -62,6 +62,10 @@ export function render(state, cam, canvas, ui) {
     drawTerrain(ctx, state, cam, canvas, S);
     drawFeatures(ctx, state, cam, canvas, S);
   }
+  // Over the ground, because at the low zooms the ground is baked and the baking
+  // has already forgotten these: the sim worked them this turn, and the reel has
+  // not shown them yet.
+  drawPending(ctx, cam, canvas, S, ui);
   drawStructures(ctx, state, cam, canvas, S);
   drawSpawners(ctx, state, cam, canvas, S);
   drawCohorts(ctx, state, cam, canvas, S, ui);
@@ -226,6 +230,25 @@ function drawFeatures(ctx, state, cam, canvas, S) {
       diamond(ctx, p.x, p.y, Math.max(2, S * 0.32));
       ctx.fill();
     }
+  }
+}
+
+/**
+ * Sites worked this resolve whose moment on the reel has not come yet.
+ *
+ * Drawn exactly as `drawFeatures` would have drawn them, so the marker the
+ * player has been looking at all game does not change shape on the one turn it
+ * matters — it simply stays until its pane has said what it was.
+ */
+function drawPending(ctx, cam, canvas, S, ui) {
+  const list = ui && ui.revealing;
+  if (!list || S < 4) return;
+  for (const f of list) {
+    const p = axialToScreen(cam, canvas, f.q, f.r);
+    if (p.x < -S || p.y < -S || p.x > canvas.width + S || p.y > canvas.height + S) continue;
+    ctx.fillStyle = FEATURE_COLOUR[f.feature] || FEATURE_COLOUR.cache;
+    diamond(ctx, p.x, p.y, Math.max(2, S * 0.32));
+    ctx.fill();
   }
 }
 

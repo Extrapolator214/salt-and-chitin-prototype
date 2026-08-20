@@ -266,6 +266,29 @@ function along(path, done) {
 }
 
 /**
+ * Sites the resolve has already worked but the reel has not yet shown.
+ *
+ * The sim marks a site worked the moment the resolve runs, and `touchMap` bakes
+ * the ground again without its marker — so by the time the reel starts, every
+ * chest found this turn has already vanished off the map. The player then
+ * watches a body walk to a bare tile and only afterwards gets told what was on
+ * it, which is the reveal backwards.
+ *
+ * So the marker is held on screen until its own pane has been and gone: a site
+ * is listed here while its beat is still ahead of, or is, the current one, and
+ * drops off the list the moment the reel moves past it.
+ */
+export function pending(reel) {
+  if (!reel || reel.done) return null;
+  const out = [];
+  for (let i = reel.i; i < reel.beats.length; i++) {
+    const b = reel.beats[i];
+    if (b.kind === 'poi' && b.focus) out.push({ q: b.focus.q, r: b.focus.r, feature: b.feature });
+  }
+  return out.length ? out : null;
+}
+
+/**
  * Everything mid-stride: the crew and the cohorts both, keyed by id, in
  * fractional axial coordinates.
  *

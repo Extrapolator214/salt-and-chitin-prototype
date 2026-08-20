@@ -40,6 +40,7 @@ const ui = {
   pendingEvents: [],
   reel: null,          // the resolve being played back, or null between turns
   walk: null,          // mid-stride positions, set only during a walk beat
+  revealing: null,     // sites worked this turn whose pane has not played yet
   // A setting rather than a per-reel control: chosen once and kept for the run.
   reelSpeed: 1,
   located: null,       // a tile pinned by "locate", until the next click
@@ -236,6 +237,7 @@ const markHeld = () => splashPane.classList.toggle('paused', paneHeld && !splash
 function endReel() {
   ui.reel = null;
   ui.walk = null;
+  ui.revealing = null;
   splash.hidden = true;
   markHeld();
   if (camBeforeReel) { cam.x = camBeforeReel.x; cam.y = camBeforeReel.y; }
@@ -306,6 +308,7 @@ function tickReel(dt) {
   reel.glide(cam, reel.cameraTarget(r, hexSize(cam)), dt);
   const done = reel.tick(r, dt, paneHeld);
   ui.walk = reel.walkPositions(r);
+  ui.revealing = reel.pending(r);
   if (done) return afterReel();
   if (r.dirty) return showBeat();
   const b = reel.beat(r);
