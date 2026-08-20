@@ -324,6 +324,46 @@ t(`the map draws in every mode without throwing`, !threw,
     `${m2.id} stands on (${face.q},${face.r}) and is ordered to cut it`);
 }
 
+// The map must not run ahead of the walk. The resolve cuts at step 2, right
+// after the walking at step 1b, so a one-turn scrub tile is road and a forest
+// tile is a third worked before anyone has watched a body reach either.
+{
+  const s = St.createState(20260816);
+  putCrewOnFrontier(s);                                 // queue a frontier of clears
+  const before = reel.snapshotMovers(s);
+  const wasScrub = [...s.map.tiles.values()]
+    .filter((t) => t.terrain === 'scrub' && before.ground.has(H.key(t.q, t.r))).map((t) => H.key(t.q, t.r));
+  const wasForest = [...s.map.tiles.values()]
+    .filter((t) => t.terrain === 'forest' && before.ground.has(H.key(t.q, t.r))).map((t) => H.key(t.q, t.r));
+  const events = resolveTurn(s);
+  const r = reel.build(s, events, before);
+  const held = reel.groundBefore(r);
+
+  // a scrub tile cut this turn: road on the state, still scrub while they walk
+  const cut = wasScrub.find((k) => {
+    const t = St.tileAt(s, ...k.split(',').map(Number));
+    return t && t.cleared;
+  });
+  t('a tile cut this turn is still its old ground while the walk plays',
+    !!cut && !!held && held.get(cut).terrain === 'scrub' && held.get(cut).cleared === false
+    && St.tileAt(s, ...cut.split(',').map(Number)).terrain === 'road',
+    cut ? `${cut}: state says road, the reel says scrub` : 'no scrub was cut this turn');
+
+  // a forest tile part-worked this turn: the wedge is held at what it was
+  const part = wasForest.find((k) => {
+    const t = St.tileAt(s, ...k.split(',').map(Number));
+    return t && !t.cleared && (t.work || 0) > 0;
+  });
+  t('a part-worked tile holds the wedge it had before the walk',
+    !!part && !!held && held.get(part).work === 0 && St.tileAt(s, ...part.split(',').map(Number)).work > 0,
+    part ? `${part}: state says ${St.tileAt(s, ...part.split(',').map(Number)).work}/3, the reel says 0/3` : 'no forest was part-worked');
+
+  // and once the walking is done the map is allowed to say what happened
+  reel.next(r);
+  t('the ground catches up the moment the walk is over',
+    reel.groundBefore(r) === null, `now on ${(reel.beat(r) || {}).kind}`);
+}
+
 // A site the resolve has worked is off the map before the reel starts — the sim
 // set featureWorked and touchMap re-baked the ground without it. The reel holds
 // the marker until its own pane has been and gone, or the player watches a body

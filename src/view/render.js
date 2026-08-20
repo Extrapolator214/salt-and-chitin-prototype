@@ -62,9 +62,13 @@ export function render(state, cam, canvas, ui) {
     drawTerrain(ctx, state, cam, canvas, S);
     drawFeatures(ctx, state, cam, canvas, S);
   }
-  // Over the ground, because at the low zooms the ground is baked and the baking
-  // has already forgotten these: the sim worked them this turn, and the reel has
-  // not shown them yet.
+  // Ground the labour changed this turn, painted back as it stood, for as long
+  // as the walk is still playing. Over the ground layer rather than inside it,
+  // because at the low zooms that layer is baked per map version — and the map
+  // version is exactly what the labour bumped.
+  drawOldGround(ctx, cam, canvas, S, ui);
+  // Same reason: the sim worked these sites this turn, and the reel has not
+  // shown them yet.
   drawPending(ctx, cam, canvas, S, ui);
   drawStructures(ctx, state, cam, canvas, S);
   drawSpawners(ctx, state, cam, canvas, S);
@@ -75,7 +79,7 @@ export function render(state, cam, canvas, ui) {
   // fight at the entry now would put its units on the road ahead of the blob
   // that becomes them.
   if (state.combat && !(ui && ui.reel)) drawCombat(ctx, state, cam, canvas, S);
-  drawWorkedGround(ctx, state, cam, canvas, S);
+  drawWorkedGround(ctx, state, cam, canvas, S, ui);
   drawQueued(ctx, state, cam, canvas, S);
   drawBatchGlow(ctx, state, cam, canvas, S);
   drawCrew(ctx, state, cam, canvas, S, ui);
@@ -231,6 +235,28 @@ function drawFeatures(ctx, state, cam, canvas, S) {
       ctx.fill();
     }
   }
+}
+
+/**
+ * Ground the labour changed this turn, repainted as it stood before it.
+ *
+ * Only the fill. The canopy shadow a felled stand used to cast is not put back
+ * — that is a property of the neighbours, baked with them, and a stand cut in
+ * one turn is rare enough not to be worth carrying a second bake for.
+ */
+function drawOldGround(ctx, cam, canvas, S, ui) {
+  const held = ui && ui.ground;
+  if (!held) return;
+  ctx.save();
+  for (const was of held.values()) {
+    const p = axialToScreen(cam, canvas, was.q, was.r);
+    if (p.x < -S || p.y < -S || p.x > canvas.width + S || p.y > canvas.height + S) continue;
+    ctx.fillStyle = was.bridge ? '#8a6a45' : C.TERRAIN_COLOUR[was.terrain];
+    ctx.beginPath();
+    hexPath(ctx, p.x, p.y, S);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 /**
@@ -522,15 +548,21 @@ function drawCombat(ctx, state, cam, canvas, S) {
  * to be on the map, not just in the panel: a wedge of the hex fills as the
  * work banks up.
  */
-function drawWorkedGround(ctx, state, cam, canvas, S) {
+function drawWorkedGround(ctx, state, cam, canvas, S, ui) {
   if (S < 5) return;
+  // While the walk plays, a tile the labour touched is read at the value it
+  // held before it — otherwise the wedge fills in under a worker who is still
+  // three tiles away, which is the same lie the terrain was telling.
+  const held = ui && ui.ground;
   ctx.save();
   ctx.fillStyle = 'rgba(226, 208, 160, 0.55)';
   for (const t of state.map.tiles.values()) {
-    if (!t.work || t.cleared) continue;
+    const was = held && held.get(key(t.q, t.r));
+    const work = was ? was.work : t.work;
+    if (!work || (was ? was.cleared : t.cleared)) continue;
     const p = axialToScreen(cam, canvas, t.q, t.r);
     if (p.x < -S || p.y < -S || p.x > canvas.width + S || p.y > canvas.height + S) continue;
-    const frac = Math.min(1, t.work / C.turnsToClear(t.terrain));
+    const frac = Math.min(1, work / C.turnsToClear(was ? was.terrain : t.terrain));
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.arc(p.x, p.y, S * 0.55, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);

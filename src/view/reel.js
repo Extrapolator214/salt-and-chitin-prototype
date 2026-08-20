@@ -14,9 +14,10 @@
 // walking dot is watching for.
 
 import C from '../sim/config.js';
-import { crewRoute } from '../sim/labour.js';
+import { crewRoute, jobPlace } from '../sim/labour.js';
 import { findPath } from '../sim/enemy.js';
-import { axialToPixel } from '../sim/hex.js';
+import { tileAt } from '../sim/state.js';
+import { axialToPixel, key } from '../sim/hex.js';
 import * as art from './ascii.js';
 
 // Seconds at 1x.
@@ -55,7 +56,32 @@ export function snapshotMovers(state) {
   for (const b of state.crew.members) crew.set(b.id, { q: b.q, r: b.r });
   const cohorts = new Map();
   for (const c of state.cohorts) cohorts.set(c.id, { q: c.q, r: c.r });
-  return { crew, cohorts };
+  return { crew, cohorts, ground: snapshotGround(state) };
+}
+
+/**
+ * The ground as it stands, for every tile somebody is about to work.
+ *
+ * Only those tiles: labour is the one thing in the resolve that rewrites the
+ * map, and it only ever touches ground an assignment or an order names. Copying
+ * the whole island every turn to catch a handful of hexes would be four
+ * thousand objects a turn for nothing.
+ */
+function snapshotGround(state) {
+  const out = new Map();
+  const add = (at) => {
+    if (!at) return;
+    const t = tileAt(state, at.q, at.r);
+    if (!t || out.has(key(t.q, t.r))) return;
+    out.set(key(t.q, t.r), {
+      q: t.q, r: t.r, terrain: t.terrain, cleared: !!t.cleared,
+      work: t.work || 0, bridge: !!t.bridge,
+    });
+  };
+  for (const a of state.crew.assignments) add(jobPlace(state, a));
+  for (const o of state.orders) add(o.target && o.target.q !== undefined ? o.target
+    : (o.q !== undefined ? { q: o.q, r: o.r } : null));
+  return out;
 }
 
 /**
@@ -109,6 +135,27 @@ function marchers(state, before) {
   return out;
 }
 
+/**
+ * Ground the labour changed this turn, as it stood before.
+ *
+ * The resolve cuts the tile at step 2, immediately after the walking at step 1b
+ * — so by the time anyone sees the reel, the scrub a hand is still three tiles
+ * short of is already road, and a forest tile shows a third of its work done by
+ * a worker who has not reached it. Held for the length of the walk, which is
+ * exactly the order the turn ran them in.
+ */
+function worked(state, before) {
+  const out = new Map();
+  for (const [k, was] of before.ground) {
+    const t = tileAt(state, was.q, was.r);
+    if (!t) continue;
+    const changed = t.terrain !== was.terrain || !!t.cleared !== was.cleared
+      || (t.work || 0) !== was.work || !!t.bridge !== was.bridge;
+    if (changed) out.set(k, was);
+  }
+  return out;
+}
+
 /** The middle of a set of tiles, for pointing the camera at a group. */
 function centroid(points) {
   if (!points.length) return null;
@@ -136,6 +183,7 @@ export function build(state, events, before) {
       kind: 'walk',
       movers: moved,
       marchers: marched,
+      ground: worked(state, before),
       // Framed on the crew when there are any, because that is where the player
       // is working and what they pressed the button to see. Only a turn with
       // nobody walking hands the camera to the enemy.
@@ -286,6 +334,17 @@ export function pending(reel) {
     if (b.kind === 'poi' && b.focus) out.push({ q: b.focus.q, r: b.focus.r, feature: b.feature });
   }
   return out.length ? out : null;
+}
+
+/**
+ * The ground as it stood before the labour, while the walk is still playing.
+ *
+ * Null everywhere else: once the walking is over the labour has happened, and
+ * the map is allowed to say so.
+ */
+export function groundBefore(reel) {
+  const b = beat(reel);
+  return b && b.kind === 'walk' && b.ground && b.ground.size ? b.ground : null;
 }
 
 /**
