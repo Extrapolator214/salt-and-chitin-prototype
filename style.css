@@ -179,3 +179,61 @@ kbd { color: var(--dim); font-size: 11px; }
 .dim { color: var(--dim); }
 .bad { color: var(--bad); }
 .good { color: var(--good); }
+
+/* ---- the resolve reel ----------------------------------------------------
+   Its own layer over the map, sitting above the modal backdrop's z-index so a
+   reel that starts while a modal is up is not drawn underneath it. The panel is
+   the same slab as a modal, because it is the same kind of object: something
+   that has interrupted you and will go away. */
+#splash {
+  position: fixed; inset: 0; z-index: 12;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 9, 11, 0.55);
+  /* Clicks fall through to nothing — the map is not interactive mid-resolve —
+     but the panel below re-enables them for its own buttons. */
+  pointer-events: none;
+}
+#splash[hidden] { display: none; }
+#splash-pane {
+  pointer-events: auto;
+  background: var(--panel); border: 1px solid var(--edge);
+  padding: 14px 18px 10px; min-width: 520px; max-width: 90vw;
+  max-height: 88vh; overflow-y: auto; overflow-x: hidden;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.55);
+}
+#splash-pane h2 {
+  margin: 0 0 10px; font-size: 14px; letter-spacing: .08em; text-transform: uppercase;
+}
+#splash-pane .note { color: var(--dim); margin: 6px 0 0; }
+#splash-pane b { color: #fff; }
+
+/* The art is a grid, not a paragraph: it must not wrap, inherit the body's
+   line height, or be re-flowed by the panel getting narrower. */
+#splash-pane .art {
+  margin: 0; white-space: pre; line-height: 1.15;
+  color: var(--warn); overflow-x: auto;
+}
+#splash-pane .art.bad { color: var(--bad); }
+
+/* Equal columns, whatever each one holds — two spawners of different silhouette
+   heights should still share the width down the middle. */
+.reel-cols { display: grid; gap: 18px; align-items: start; }
+.reel-col { min-width: 0; }
+.reel-name {
+  margin-top: 6px; color: var(--text);
+  letter-spacing: .06em; text-transform: uppercase;
+}
+.reel-arrow { color: var(--dim); text-align: center; line-height: 1.1; }
+.reel-col .bar { color: var(--bad); letter-spacing: .12em; }
+
+.reel-controls {
+  display: flex; gap: 6px; align-items: center;
+  margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--edge);
+}
+.reel-controls .dim { flex: 1; }
+.reel-controls button.on { background: #2f3742; color: #fff; }
+
+/* Time left in the beat, as a line that drains. Only its width is written per
+   frame — the splash's markup itself is built once, when the beat changes. */
+#splash-bar { height: 2px; background: var(--edge); margin: 10px 0 0; }
+#splash-bar > i { display: block; height: 100%; background: var(--warn); width: 100%; }

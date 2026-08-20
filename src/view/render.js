@@ -70,7 +70,7 @@ export function render(state, cam, canvas, ui) {
   drawWorkedGround(ctx, state, cam, canvas, S);
   drawQueued(ctx, state, cam, canvas, S);
   drawBatchGlow(ctx, state, cam, canvas, S);
-  drawCrew(ctx, state, cam, canvas, S);
+  drawCrew(ctx, state, cam, canvas, S, ui);
   drawPlacement(ctx, state, cam, canvas, S, ui);
   drawHighlights(ctx, state, cam, canvas, S, ui);
 }
@@ -578,8 +578,9 @@ function dotSpots(n, S) {
  * are blue and a shade larger; anyone still walking to a job is joined to it by
  * a thin line, so a turn spent on the road is visible.
  */
-function drawCrew(ctx, state, cam, canvas, S) {
+function drawCrew(ctx, state, cam, canvas, S, ui) {
   if (S < 5) return;
+  if (ui && ui.walk) return drawWalkers(ctx, state, cam, canvas, S, ui.walk);
   const byTile = new Map();
   const jobOf = new Map();
   for (const a of state.crew.assignments) {
@@ -624,6 +625,39 @@ function drawCrew(ctx, state, cam, canvas, S) {
       ctx.strokeStyle = 'rgba(18, 22, 28, 0.85)';
       ctx.stroke();
     });
+  }
+  ctx.restore();
+}
+
+/**
+ * The same bodies mid-stride, during the resolve reel.
+ *
+ * A separate pass rather than a branch inside the one above, because almost
+ * every assumption changes: `walk` holds fractional axial coordinates, so there
+ * is no tile to group by and no need for the spot offsets that keep four bodies
+ * on one hex apart — a walker is between hexes and stands on its own. The
+ * dashed line to the job is dropped too; the dot is visibly going there.
+ */
+function drawWalkers(ctx, state, cam, canvas, S, walk) {
+  ctx.save();
+  const rad = Math.max(1.6, S * 0.15);
+  for (const m of state.crew.members) {
+    const at = walk.get(m.id) || m;
+    const p = axialToScreen(cam, canvas, at.q, at.r);
+    if (p.x < -S || p.y < -S || p.x > canvas.width + S || p.y > canvas.height + S) continue;
+    const officer = m.kind === 'officer';
+    const moving = walk.has(m.id);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, officer ? rad * 1.35 : rad, 0, Math.PI * 2);
+    // Anyone standing still this turn is dimmed rather than hidden, so the eye
+    // has the whole company for scale and only the movers pull it.
+    ctx.globalAlpha = moving ? 1 : 0.35;
+    ctx.fillStyle = officer ? '#8fc0ff' : '#efe4c8';
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(18, 22, 28, 0.85)';
+    ctx.stroke();
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 }

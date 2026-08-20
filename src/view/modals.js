@@ -535,7 +535,7 @@ const VIEWS = {
     const spare = O.projectedHands(state) + O.projectedIdleOfficers(state).length;
     if (spare) under.push(`<span class="why">${spare} standing about</span>`);
     const cohorts = state.cohorts.length;
-    if (cohorts) under.push(`${cohorts} cohort${cohorts === 1 ? '' : 'es'} on the move`);
+    if (cohorts) under.push(`${cohorts} cohort${cohorts === 1 ? '' : 's'} on the move`);
     if (under.length) h += `<p class="note">${under.join(' · ')}</p>`;
     return h;
   },

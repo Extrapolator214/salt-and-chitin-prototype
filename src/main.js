@@ -15,6 +15,7 @@ import { renderHud } from './view/hud.js';
 import { renderHover } from './view/hover.js';
 import { renderLog } from './view/log.js';
 import * as modals from './view/modals.js';
+import * as reel from './view/reel.js';
 
 const canvas = document.getElementById('map');
 const hudEl = document.getElementById('hud');
@@ -24,6 +25,8 @@ const logEl = document.getElementById('log');
 const modalEl = document.getElementById('modal');
 const backdrop = document.getElementById('backdrop');
 const strip = document.getElementById('combat-strip');
+const splash = document.getElementById('splash');
+const splashPane = document.getElementById('splash-pane');
 
 const params = new URLSearchParams(location.search);
 const seedFromUrl = Number(params.get('seed'));
@@ -34,6 +37,8 @@ const ui = {
   hover: null,
   placing: null,       // a building type following the cursor
   pendingEvents: [],
+  reel: null,          // the resolve being played back, or null between turns
+  walk: null,          // mid-stride crew positions, set only during a walk beat
   revoke: (id) => { O.revoke(state, id); refresh(); },
   place: (building) => { ui.placing = building; refresh(); },
   order: (o) => { const r = O.enqueue(state, o); if (!r.ok) flash(r.why); return r; },
@@ -44,6 +49,7 @@ const ui = {
   newRun: (seed) => {
     state = createState(seed || modals.nextSeed(state.seed));
     ui.pendingEvents = [];
+    endReel();
     modals.close(ui);
     resize();
     centreOn(cam, canvas, state.base.q, state.base.r);
@@ -143,9 +149,95 @@ function endTurn(confirmed = false) {
     return modals.open('idleWarning', {}, ui);
   }
   modals.close(ui);
+
+  // Taken before the resolve, because the resolve moves them: the reel needs
+  // where everyone stood, and by the time it can be built nobody is there.
+  const before = reel.snapshotCrew(state);
   ui.pendingEvents = resolveTurn(state);
+
+  ui.reel = reel.build(state, ui.pendingEvents, before);
+  if (ui.reel) {
+    camBeforeReel = { x: cam.x, y: cam.y };
+    showBeat();
+    refresh();
+    return;                                              // the reel takes over
+  }
+  afterReel();
+}
+
+/**
+ * What happens once the reel has played, or straight away on a turn with
+ * nothing to show. The contact is the reel's last act — it has its own strip
+ * and its own clock and always did — so it runs after, not inside.
+ */
+function afterReel() {
+  endReel();
   if (state.combat) { renderStrip(); refresh(); return; } // the ticker takes over
   finishTurn();
+}
+
+// ---- the resolve reel ------------------------------------------------------
+
+// Where the player had the map pointed before the reel took the camera off them.
+let camBeforeReel = null;
+
+/**
+ * Put the reel away and give the map back — including the view.
+ *
+ * The focus is a loan, not a move: a reel that ends twenty tiles from where the
+ * player was working has cost them their place, and they did not ask to be taken
+ * there. Zoom is left alone throughout for the same reason it is not animated —
+ * the map is baked per zoom level, and stepping it mid-reel throws that away.
+ */
+function endReel() {
+  ui.reel = null;
+  ui.walk = null;
+  splash.hidden = true;
+  if (camBeforeReel) { cam.x = camBeforeReel.x; cam.y = camBeforeReel.y; }
+  camBeforeReel = null;
+}
+
+/**
+ * Draw the current beat's splash. Called when the beat changes, not per frame —
+ * the walk beat has no splash at all, which is what hides the panel for it.
+ */
+function showBeat() {
+  const r = ui.reel;
+  if (!r) return;
+  r.dirty = false;
+  const pane = reel.paneHtml(r);
+  if (!pane) { splash.hidden = true; return; }
+  splash.hidden = false;
+  splashPane.innerHTML = pane + reel.controlsHtml(r) + '<div id="splash-bar"><i></i></div>';
+  splashPane.querySelectorAll('[data-r]').forEach((b) => {
+    b.onclick = () => {
+      const v = b.dataset.r;
+      if (v === 'skip') return skipReel();
+      if (v === 'next') { reel.next(r); return r.done ? afterReel() : showBeat(); }
+      r.speed = Number(v);
+      showBeat();                                      // repaint the pressed state
+    };
+  });
+}
+
+/** Abandon the rest of the reel and get on with the turn. */
+function skipReel() {
+  if (!ui.reel) return;
+  reel.skip(ui.reel);
+  afterReel();
+}
+
+/** One frame of the reel: the clock, the camera, the walkers, the drain bar. */
+function tickReel(dt) {
+  const r = ui.reel;
+  const done = reel.tick(r, dt);
+  ui.walk = reel.walkPositions(r);
+  reel.glide(cam, reel.cameraTarget(r, hexSize(cam)), dt);
+  if (done) return afterReel();
+  if (r.dirty) return showBeat();
+  const b = reel.beat(r);
+  const bar = splashPane.querySelector('#splash-bar > i');
+  if (bar && b) bar.style.width = `${Math.max(0, 100 - (r.t / b.seconds) * 100)}%`;
 }
 
 function finishTurn() {
@@ -195,7 +287,9 @@ function frame(now) {
   last = now;
 
   resize();
-  if (state.phase === 'combat' && state.combat) {
+  if (ui.reel) {
+    tickReel(dt);
+  } else if (state.phase === 'combat' && state.combat) {
     const done = combat.tick(state, dt);
     renderStrip();
     if (done) {
@@ -215,7 +309,7 @@ requestAnimationFrame(frame);
 let dragging = false, dragged = false, lastX = 0, lastY = 0;
 
 canvas.addEventListener('mousedown', (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || ui.reel) return;
   dragging = true; dragged = false;
   lastX = e.offsetX; lastY = e.offsetY;
 });
@@ -315,6 +409,18 @@ window.addEventListener('keydown', (e) => {
   // all three are letters someone may want in a box. Esc still closes.
   const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
   if (typing && e.key !== 'Escape') return;
+  // The reel owns the keyboard while it plays: Esc gives up on it, Space cuts to
+  // the next beat rather than ending a turn that is still being shown.
+  if (ui.reel) {
+    if (e.key === 'Escape') { e.preventDefault(); skipReel(); return; }
+    if (e.key === ' ') {
+      e.preventDefault();
+      reel.next(ui.reel);
+      if (ui.reel.done) afterReel(); else showBeat();
+      return;
+    }
+    return;
+  }
   if (e.key === 'Escape') { ui.placing = null; modals.close(ui); refresh(); return; }
   if (e.key === ' ') { e.preventDefault(); endTurn(); return; }
   if (state.phase === 'combat') {
@@ -343,7 +449,7 @@ backdrop.addEventListener('mousedown', (e) => { if (e.target === backdrop) modal
 if (params.get('dev') === '1') {
   window.game = {
     get state() { return state; },
-    ui, C, O, B, St, H, modals, cam, canvas,
+    ui, C, O, B, St, H, modals, reel, cam, canvas,
     endTurn, refresh,
     closeModal: () => modals.close(ui),
   };

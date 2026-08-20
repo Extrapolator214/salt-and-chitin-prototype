@@ -34,6 +34,11 @@
 
 <div id="backdrop" hidden><div id="modal"></div></div>
 
+<!-- The resolve reel's own layer, above the map and below nothing. Kept out of
+     the modal stack on purpose: the reel opens and closes several of these a
+     turn, and it must not disturb whatever modal the player had open. -->
+<div id="splash" hidden><div id="splash-pane"></div></div>
+
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

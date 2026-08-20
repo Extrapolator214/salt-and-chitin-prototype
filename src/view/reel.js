@@ -1,0 +1,296 @@
+// The resolve reel: what the turn just did, played back at watching speed.
+//
+// The sim is not involved. `resolveTurn` still runs to completion in one
+// synchronous call and still returns the same event list it always did — the
+// reel is built from that list afterwards and replays it, so nothing here can
+// change an outcome. That is the whole design constraint: a cinematic that can
+// desync from the rules it is illustrating is worse than no cinematic, and the
+// only way to be sure it cannot is to give it no way to write.
+//
+// The cost of that choice is that the reel shows the finished map while the
+// crew are still walking across it — ground they cut this turn is already open
+// under their feet. The alternative is keeping a second, rewindable copy of the
+// island, which is a great deal of machinery for a detail nobody looking at a
+// walking dot is watching for.
+
+import C from '../sim/config.js';
+import { crewRoute } from '../sim/labour.js';
+import { axialToPixel } from '../sim/hex.js';
+import * as art from './ascii.js';
+
+// Seconds at 1x. The walk is the only beat anyone actually reads — the rest are
+// glances, and a glance that outstays its welcome 300 times a run is the thing
+// most likely to make somebody turn the whole feature off.
+const WALK_MIN = 1.1;
+const WALK_PER_STEP = 0.22;
+const WALK_MAX = 4.0;
+const POI_SECONDS = 2.2;
+const BREED_SECONDS = 0.9;
+const RELEASE_SECONDS = 2.4;
+
+// How hard the camera is pulled to the beat's subject. Exponential smoothing,
+// so it is framerate independent — a dropped frame moves it further, not less.
+const CAMERA_PULL = 3.2;
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// ---- building the reel -----------------------------------------------------
+
+/** Where every body stood before the resolve moved them. */
+export function snapshotCrew(state) {
+  const m = new Map();
+  for (const b of state.crew.members) m.set(b.id, { q: b.q, r: b.r });
+  return m;
+}
+
+/**
+ * The walking, as routes rather than as two endpoints.
+ *
+ * Asked of the map as it stands *after* the resolve, which is the map they will
+ * be shown crossing — a gang that spent the turn cutting a road has opened it,
+ * and a dot that walks the old way round would be walking past its own work.
+ */
+function walkers(state, before) {
+  const out = [];
+  for (const b of state.crew.members) {
+    const from = before.get(b.id);
+    if (!from || (from.q === b.q && from.r === b.r)) continue;
+    const route = crewRoute(state, from, { q: b.q, r: b.r });
+    // An unreachable pair still walked — the ground closed behind them, or they
+    // were landed rather than sent. Two points is a straight line, which is the
+    // honest picture of a move nobody can draw a road for.
+    const path = route.reachable && route.steps.length > 1
+      ? route.steps
+      : [from, { q: b.q, r: b.r }];
+    out.push({ id: b.id, kind: b.kind, path });
+  }
+  return out;
+}
+
+/** The middle of a set of tiles, for pointing the camera at a group. */
+function centroid(points) {
+  if (!points.length) return null;
+  let q = 0, r = 0;
+  for (const p of points) { q += p.q; r += p.r; }
+  return { q: q / points.length, r: r / points.length };
+}
+
+/**
+ * The beats of one resolve, in the order the turn ran them.
+ *
+ * Returns null when the turn had nothing to show — an early turn with the crew
+ * standing still and both spawners quietly breeding is most of them, and a reel
+ * that interrupts to say nothing happened is worse than no reel.
+ */
+export function build(state, events, before) {
+  const beats = [];
+
+  const moved = walkers(state, before);
+  if (moved.length) {
+    const steps = Math.max(...moved.map((w) => w.path.length - 1));
+    beats.push({
+      kind: 'walk',
+      movers: moved,
+      focus: centroid(moved.flatMap((w) => [w.path[0], w.path[w.path.length - 1]])),
+      seconds: Math.min(WALK_MAX, WALK_MIN + WALK_PER_STEP * steps),
+    });
+  }
+
+  // One per site, in the order they were worked. The officer's own name arrives
+  // on a separate event pushed right after the feature, so it is read forward
+  // from here rather than searched for — two castaways in a turn is possible.
+  events.forEach((e, i) => {
+    if (e.kind !== 'feature') return;
+    const joined = events.slice(i + 1).find((x) => x.kind === 'officer');
+    beats.push({
+      kind: 'poi',
+      feature: e.feature,
+      wood: e.wood, gold: e.gold,
+      name: e.feature === 'officer' && joined ? joined.name : null,
+      trade: e.feature === 'officer' && joined ? joined.trade : null,
+      focus: { q: e.q, r: e.r },
+      seconds: POI_SECONDS,
+    });
+  });
+
+  // Read off the spawners rather than off an event, because breeding does not
+  // raise one — it is a counter ticking, and the counter is already on the state
+  // in exactly the form the splash wants to draw.
+  const alive = state.spawners.filter((s) => s.alive);
+  if (alive.length) {
+    beats.push({
+      kind: 'breed',
+      spawners: alive.map((s) => ({
+        kind: s.kind, name: s.name, stars: s.stars, cap: s.cap,
+        turns: s.accumulatedTurns, of: C.ACCUMULATE_TURNS,
+      })),
+      focus: null,
+      seconds: BREED_SECONDS,
+    });
+  }
+
+  const released = events.filter((e) => e.kind === 'cohort');
+  if (released.length) {
+    beats.push({
+      kind: 'release',
+      cohorts: released.map((e) => {
+        const sp = state.spawners.find((s) => s.id === e.id);
+        return { kind: sp ? sp.kind : 'hive', name: e.spawner, units: e.units, q: e.q, r: e.r };
+      }),
+      focus: centroid(released.map((e) => ({ q: e.q, r: e.r }))),
+      seconds: RELEASE_SECONDS,
+    });
+  }
+
+  if (!beats.length) return null;
+  return { beats, i: 0, t: 0, speed: 1, dirty: true, done: false };
+}
+
+// ---- playing it ------------------------------------------------------------
+
+export const beat = (reel) => reel.beats[reel.i] || null;
+
+/** Cut to the next beat, ending the reel if that was the last one. */
+export function next(reel) {
+  reel.i++;
+  reel.t = 0;
+  reel.dirty = true;
+  if (reel.i >= reel.beats.length) reel.done = true;
+}
+
+/** Abandon the rest of it. The turn carries on from wherever it had got to. */
+export function skip(reel) {
+  reel.i = reel.beats.length;
+  reel.done = true;
+  reel.dirty = true;
+}
+
+/**
+ * Advance by `dt` real seconds. Returns true when the last beat has played out.
+ *
+ * The camera is a separate call — `cameraTarget` and `glide` — because only the
+ * caller knows the hex size the target has to be measured in.
+ */
+export function tick(reel, dt) {
+  if (reel.done) return true;
+  const b = beat(reel);
+  if (!b) { reel.done = true; return true; }
+
+  reel.t += dt * reel.speed;
+  if (reel.t >= b.seconds) next(reel);
+  return reel.done;
+}
+
+/** Where the camera wants to be for the current beat, in world pixels. */
+export function cameraTarget(reel, size) {
+  const b = beat(reel);
+  if (!b || !b.focus) return null;
+  return axialToPixel(b.focus.q, b.focus.r, size);
+}
+
+/** Ease the camera a step toward the beat's subject. */
+export function glide(cam, target, dt) {
+  if (!target) return;
+  const k = 1 - Math.exp(-CAMERA_PULL * dt);
+  cam.x += (target.x - cam.x) * k;
+  cam.y += (target.y - cam.y) * k;
+}
+
+/**
+ * Every walker's position part way along its own route, in fractional axial
+ * coordinates. Null when the current beat is not the walk, which is what tells
+ * the renderer to go back to drawing bodies where the state says they stand.
+ */
+export function walkPositions(reel) {
+  const b = beat(reel);
+  if (!b || b.kind !== 'walk') return null;
+  const done = Math.max(0, Math.min(1, reel.t / b.seconds));
+  const out = new Map();
+  for (const w of b.movers) {
+    const last = w.path.length - 1;
+    const at = done * last;
+    const i = Math.min(last, Math.floor(at));
+    const j = Math.min(last, i + 1);
+    const f = at - i;
+    out.set(w.id, {
+      q: w.path[i].q + (w.path[j].q - w.path[i].q) * f,
+      r: w.path[i].r + (w.path[j].r - w.path[i].r) * f,
+    });
+  }
+  return out;
+}
+
+// ---- the splash ------------------------------------------------------------
+
+const pane = (title, body, note = '') =>
+  `<h2>${esc(title)}</h2><pre class="art">${esc(body)}</pre>`
+  + (note ? `<p class="note">${note}</p>` : '');
+
+function poiPane(b) {
+  if (b.feature === 'wreck') {
+    return pane('a shipwreck is searched', art.WRECK,
+      `<b>+${b.wood}</b> wood out of her ribs`);
+  }
+  if (b.feature === 'cache') {
+    return pane('a chest is dug up', art.CACHE,
+      `<b>+${b.gold}</b> gold, and gold is the only thing that buys a gun`);
+  }
+  return pane('a castaway is saved', art.CASTAWAY,
+    b.name ? `${esc(b.name)} joins the company — ${esc(b.trade || 'a pirate')}` : 'he joins the company');
+}
+
+/** Both fronts side by side, each in its own equal share of the width. */
+function breedPane(b) {
+  const cols = b.spawners.map((s) => {
+    const bar = '#'.repeat(s.turns) + '.'.repeat(Math.max(0, s.of - s.turns));
+    const stars = '*'.repeat(s.stars) + '-'.repeat(Math.max(0, s.cap - s.stars));
+    return '<div class="reel-col">'
+      + `<pre class="art">${esc(art.forSpawner(s.kind))}</pre>`
+      + `<div class="reel-name">${esc(s.name)}</div>`
+      + `<div class="note">brood <span class="bar">${esc(bar)}</span> ${s.turns}/${s.of}</div>`
+      + `<div class="note">stars <span class="bar">${esc(stars)}</span> ${s.stars}/${s.cap}</div>`
+      + '</div>';
+  });
+  return '<h2>the island breeds</h2>'
+    + `<div class="reel-cols" style="grid-template-columns: repeat(${b.spawners.length}, 1fr)">`
+    + cols.join('') + '</div>';
+}
+
+/** Everything let go this turn, one column each. */
+function releasePane(b) {
+  const cols = b.cohorts.map((c) => '<div class="reel-col">'
+    + `<pre class="art">${esc(art.forSpawner(c.kind))}</pre>`
+    + '<div class="reel-arrow">|</div>'
+    + `<pre class="art bad">${esc(art.column(c.units))}</pre>`
+    + `<div class="reel-name">${esc(c.name)}</div>`
+    + `<div class="note">a cohort of <b>${c.units}</b> is on the road</div>`
+    + '</div>');
+  return '<h2>cohorts released</h2>'
+    + `<div class="reel-cols" style="grid-template-columns: repeat(${b.cohorts.length}, 1fr)">`
+    + cols.join('') + '</div>';
+}
+
+/**
+ * The splash for the current beat. Called only when the beat changes, never per
+ * frame — the progress bar under it is a CSS animation for exactly that reason.
+ */
+export function paneHtml(reel) {
+  const b = beat(reel);
+  if (!b || b.kind === 'walk') return null;
+  if (b.kind === 'poi') return poiPane(b);
+  if (b.kind === 'breed') return breedPane(b);
+  if (b.kind === 'release') return releasePane(b);
+  return null;
+}
+
+/** The line of controls, the same three the contact strip has always had. */
+export function controlsHtml(reel) {
+  const on = (s) => (reel.speed === s ? ' class="on"' : '');
+  return '<div class="reel-controls">'
+    + `<span class="dim">${reel.i + 1} / ${reel.beats.length}</span>`
+    + `<button data-r="1"${on(1)}>1x</button>`
+    + `<button data-r="3"${on(3)}>3x</button>`
+    + '<button data-r="next">next</button>'
+    + '<button data-r="skip">skip</button>'
+    + '</div>';
+}
