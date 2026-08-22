@@ -18,7 +18,6 @@ Orders available:
 |---|---|
 | assign a hand or officer to **clear** from an anchor tile | — |
 | assign a hand or officer to **man** a tower or building | — |
-| unassign | — |
 | **build a tower** (tier 1) | 30 wood + 20 stone |
 | **fit an item** to a tower (upgrade in place) | the item |
 | **disassemble a tower** | refunds 80% + the item |
@@ -36,6 +35,13 @@ Orders available:
 Every order is appended to `state.orders` and **applied only during resolve**.
 Until the turn ends, any order can be revoked at no cost. The queue is visible
 as a list; ending the turn shows what is about to happen.
+
+Two things the player can do are **not** orders, because there is nothing in
+either for a resolve to carry out: a trade over the Trading Dock's counter, and
+**standing a worker down**. Taking a worker off a job frees the body on the spot
+and moves nobody — they go on standing where the job left them — so the body is
+loose the instant the button is pressed and can be given something else to do in
+that same phase.
 
 There is no confirmation dialog on anything.
 

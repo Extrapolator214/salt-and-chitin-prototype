@@ -393,7 +393,7 @@ function poiPane(b) {
   }
   if (b.feature === 'cache') {
     return pane('a chest is dug up', art.CACHE,
-      `<b>+${b.gold}</b> gold, and gold is the only thing that buys a gun`);
+      `<b>+${b.gold}</b> gold, and gold buys a gun outright — iron wants a Workshop first`);
   }
   return pane('a castaway is saved', art.CASTAWAY,
     b.name ? `${esc(b.name)} joins the company — ${esc(b.trade || 'a pirate')}` : 'he joins the company');
@@ -460,6 +460,13 @@ const BEAT_LABEL = {
  * settled on it for the run, and a control that only exists while it is being
  * used cannot be set in advance. Stepping a single beat is the opposite kind of
  * thing and lives on the splash instead.
+ *
+ * `skip` is the third of those settings and not a fourth kind of thing. It was
+ * a button that could only be pressed while a reel was already running, which
+ * is to say it was greyed out at every moment a player might have decided they
+ * had seen enough of these — the decision is about resolves in general, so it
+ * belongs beside the speeds and is set the same way. Chosen, a turn resolves
+ * with no panes, no walk and no report: the next player phase, at once.
  */
 export function panelHtml(reel, speed) {
   const on = (s) => (s === speed ? ' class="on"' : '');
@@ -468,13 +475,13 @@ export function panelHtml(reel, speed) {
     + '<span class="k">speed</span>'
     + `<button data-r="1"${on(1)}>1x</button>`
     + `<button data-r="3"${on(3)}>3x</button>`
-    + '<span class="gap"></span>'
-    + `<button data-r="skip"${b ? '' : ' disabled'}>skip</button>`
+    + `<button data-r="skip"${on('skip')}>skip</button>`
     + '</div>';
 
   const line = b
     ? `<div class="beat"><b>${esc(BEAT_LABEL[b.kind] || b.kind)}</b> · ${reel.i + 1} of ${reel.beats.length}</div>`
-    : '<div class="beat">plays when the turn ends</div>';
+    : `<div class="beat">${speed === 'skip'
+      ? 'off — turns resolve without it' : 'plays when the turn ends'}</div>`;
 
   return '<h3>Resolve turn animation</h3>' + line + controls
     + (b ? '<div id="reel-bar"><i></i></div>' : '');

@@ -2,9 +2,12 @@
 // target, and the next piece of work on it.
 //
 // Road for free, clearable ground by the tile, rivers priced at what a bridge
-// costs, ocean not at all. Sand and salt are walkable but can never be cleared,
-// so no road will ever run over them — they are walls to a road even though a
-// worker can cross them.
+// costs, ocean not at all. Sand, salt and meadow can never be cleared, so no
+// road will ever run *over* them — but they are open ground joined to the ship
+// like any road, so a route crosses them for nothing. They used to be priced as
+// walls, which was right when the network was road-only and is wrong now: the
+// ship stands on an apron of sand, and a route that refuses sand never leaves
+// the hull.
 
 import C from '../src/sim/config.js';
 import * as H from '../src/sim/hex.js';
@@ -38,8 +41,10 @@ export function roadRoute(s, target) {
       else if (t.occupant?.kind === 'spawner') step = 2;
       else if (t.terrain === 'freshwater') step = 4;
       else if (t.occupant) continue;
+      // Open ground the island came with: crossed for nothing, cut never.
+      else if (St.isOpenGround(t)) step = 0.2;
       else if (C.TERRAIN[t.terrain].clearable) step = 1;
-      else continue; // sand, salt and cliff will never be road
+      else continue; // cliff will never be road
       const ng = g.get(cur.k) + step;
       if (ng < (g.get(nk) ?? Infinity)) {
         g.set(nk, ng);

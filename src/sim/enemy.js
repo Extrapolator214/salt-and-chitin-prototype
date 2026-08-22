@@ -3,7 +3,7 @@
 import C from './config.js';
 import { key, distance, neighbours, spiral } from './hex.js';
 import {
-  tileAt, isPassable, isRoad, roadNetwork, addLog, nextId, draw, drawInt, drawPick,
+  tileAt, isPassable, isCrewGround, shipNetwork, addLog, nextId, draw, drawInt, drawPick,
 } from './state.js';
 
 // ---- pathing ---------------------------------------------------------------
@@ -93,8 +93,12 @@ export function findPath(state, from, to, phase = 'advance') {
   return path.reverse();
 }
 
-/** Shortest road-and-bridge path, BFS. Used to walk units in during a resolve. */
-export function roadPath(state, from, to, phase = 'assault') {
+/**
+ * Shortest path over the ship's open ground, BFS. Used to walk units in during
+ * a resolve. Road and bridge are open ground and so are sand, salt and meadow:
+ * a swarm coming up the beach is coming up the beach.
+ */
+export function openPath(state, from, to, phase = 'assault') {
   const startK = key(from.q, from.r), goalK = key(to.q, to.r);
   const prev = new Map([[startK, null]]);
   const queue = [{ q: from.q, r: from.r, k: startK }];
@@ -108,7 +112,7 @@ export function roadPath(state, from, to, phase = 'assault') {
       const t = state.map.tiles.get(nk);
       if (!t) continue;
       const goal = nk === goalK;
-      if (!goal && (!isRoad(t) || !isPassable(state, t, phase))) continue;
+      if (!goal && (!isCrewGround(state, t) || !isPassable(state, t, phase))) continue;
       prev.set(nk, cur.k);
       queue.push({ q: n.q, r: n.r, k: nk });
     }
@@ -125,24 +129,24 @@ export function roadPath(state, from, to, phase = 'assault') {
 }
 
 /**
- * A tile an advancing cohort enters at: any road or bridge joined to the ship by
- * road, or the ship's own standing. A patch cut out in the field draws nothing
- * until it is linked up — and with no road cut at all, the ship itself is the
- * only thing there is to walk into.
+ * A tile an advancing cohort enters at: any open ground joined to the ship —
+ * road, bridge, sand, salt flat or meadow — or the ship's own standing. A patch
+ * cut out in the field draws nothing until it is linked up, and open ground
+ * that touches nothing of yours is just ground.
  */
 export function isEntry(state, tile) {
-  return !!tile && roadNetwork(state).has(key(tile.q, tile.r));
+  return !!tile && shipNetwork(state).has(key(tile.q, tile.r));
 }
 
 /**
  * What a cohort is making for.
  *
- * It heads for the nearest tile of the player's road — the road being whatever
- * is joined to the ship. If the ship itself is nearer than any of that road, it
- * comes straight for the ship instead and crosses the open ground.
+ * It heads for the nearest tile of the ship's open ground — whatever is joined
+ * to the ship, cut or natural. If the ship itself is nearer than any of that,
+ * it comes straight for the ship instead.
  */
 export function cohortTarget(state, cohort) {
-  const net = roadNetwork(state);
+  const net = shipNetwork(state);
   let best = null, bestD = Infinity;
   for (const k of net) {
     const t = state.map.tiles.get(k);
@@ -156,9 +160,9 @@ export function cohortTarget(state, cohort) {
   return { q: best.q, r: best.r, ship: false };
 }
 
-/** Is there a continuous road path from the base to a tile beside this spawner? */
-export function roadReaches(state, spawner) {
-  const net = roadNetwork(state);
+/** Is there a continuous walk over the ship's open ground to a tile beside this spawner? */
+export function networkReaches(state, spawner) {
+  const net = shipNetwork(state);
   const edge = new Set();
   for (const f of spawner.footprint) for (const n of neighbours(f.q, f.r)) edge.add(key(n.q, n.r));
   for (const f of spawner.footprint) edge.delete(key(f.q, f.r));

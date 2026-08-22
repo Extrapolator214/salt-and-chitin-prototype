@@ -15,13 +15,43 @@ import { evolutionPartners } from '../src/sim/build.js';
 import * as A from '../src/sim/assault.js';
 
 import { officerById } from '../src/sim/state.js';
-import { roadReaches } from '../src/sim/enemy.js';
+import { networkReaches } from '../src/sim/enemy.js';
 import { clearCapacity } from '../src/sim/labour.js';
 import { roadRoute, roadFace, driveRoadGang, putCrewOnFrontier, putOfficerOnFrontier, workFeatures } from './route.mjs';
 import { resolveTurn, concludeTurn } from '../src/sim/turn.js';
 import { skip, finishCombat } from '../src/sim/combat.js';
 
 // ---- the turn ---------------------------------------------------------------
+
+/**
+ * Has the gang actually driven a road to this spawner? Not the same question as
+ * `networkReaches`, which asks whether open ground of any kind joins the ship —
+ * and open ground chains: beaches and meadows run right across the island, so
+ * a spawner seventy tiles out reads as "reached" before a single tile is cut
+ * toward it. That is the right answer for where a cohort walks in and the wrong
+ * one for "do I still owe this spawner a road", which is what the gang is asked.
+ */
+function roadedTo(s, spawner) {
+  const seen = new Set();
+  const queue = [];
+  for (const f of (s.island?.footprint ?? [s.base])) {
+    const k = H.key(f.q, f.r);
+    seen.add(k);
+    queue.push(f);
+  }
+  for (let head = 0; head < queue.length; head++) {
+    for (const n of H.neighbours(queue[head].q, queue[head].r)) {
+      const k = H.key(n.q, n.r);
+      if (seen.has(k)) continue;
+      const t = St.tileAt(s, n.q, n.r);
+      if (!St.isRoad(t) || t.occupant?.kind === 'spawner') continue;
+      seen.add(k);
+      queue.push(n);
+    }
+  }
+  return spawner.footprint.some((f) => H.neighbours(f.q, f.r)
+    .some((n) => seen.has(H.key(n.q, n.r))));
+}
 
 function playTurn(s) {
   const events = resolveTurn(s);
@@ -36,6 +66,22 @@ function playTurn(s) {
 const officers = (s) => s.crew.officers;
 const idleOfficer = (s, role) => St.idleOfficers(s).find((o) => o.role === role);
 const built = (s, type) => s.buildings.filter((b) => b.type === type);
+/** How this kind's fitting is got: crafted at a Workshop, or bought off a Merchant. */
+const itemOrder = (kind) => (C.itemSource(kind) === 'iron'
+  ? { type: 'craftItem', tower: kind } : { type: 'buyItem', tower: kind });
+/** The houses the policy's two tower kinds need standing before a gun can go up. */
+function gunKinds(k) {
+  const mate = evolutionPartners(k.towerKind).filter((i) => i < C.TOWERS.length)[0];
+  return [k.towerKind, mate].filter((i) => i !== undefined);
+}
+function gunHouses(k) {
+  const houses = [...new Set(gunKinds(k).map((i) => C.itemHouse(i)))];
+  // Crafting wants iron, and one Forge makes one a turn against a fitting's
+  // six. The dock's counter is the way round it: gold the camps dig, over the
+  // counter, out as iron. So the dock is part of the gun line's plant.
+  if (gunKinds(k).some((i) => C.itemSource(i) === 'iron')) houses.push('dock');
+  return houses;
+}
 const working = (s, type) => s.buildings.some((b) => b.type === type && St.isBuildingManned(s, b));
 
 /**
@@ -100,7 +146,7 @@ function buildingSpot(s, type) {
 function clearPad(s, type, hands = 3) {
   const def = C.buildingDef(type);
   if (!def) return false;
-  const net = St.roadNetwork(s);
+  const net = St.shipNetwork(s);
   const allow = B.buildingAllow(s, type);
   const usable = (t) => !!t && !t.occupant && (t.cleared || St.isClearable(s, t)) && (!allow || allow(t));
   let best = null;
@@ -129,6 +175,31 @@ function clearPad(s, type, hands = 3) {
   return put > 0;
 }
 
+/**
+ * Cut a yard for a gun that has nowhere to stand — `clearPad`, for towers.
+ *
+ * A gun's shape is settled the day it goes up and the whole of it has to be
+ * open, so the wide kinds are the ones this is for: a Culverin Battery wants
+ * two tiles and an Aviary three, and beside a one-tile road neither of them has
+ * a second tile until somebody cuts one.
+ */
+function clearGunPad(s, radius, kinds, hands = 3) {
+  for (const kind of kinds) {
+    const spot = towerSpot(s, radius, kind, true);
+    if (!spot) continue;
+    const short = (gunShape(s, spot, kind, true) || []).filter((t) => !St.isBuildable(s, t, true));
+    if (!short.length) continue;   // it is already legal; towerSpot will find it
+    let put = 0;
+    for (const t of short) {
+      if (put >= hands) break;
+      if (O.workersOn(s, t).length) continue;
+      if (O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: t.q, r: t.r } }).ok) put++;
+    }
+    if (put > 0) return true;
+  }
+  return false;
+}
+
 /** An Excavation Camp has to cover an unworked cache; find one it can reach. */
 function campSpot(s) {
   const caches = [...s.map.tiles.values()]
@@ -144,24 +215,45 @@ function campSpot(s) {
   return null;
 }
 
-/** A tower spot on the ring the enemy walks in through. */
+/**
+ * Every tile of a gun's shape laid on `h`, or null if the ground cannot be it.
+ *
+ * `mayCut` is the difference between "a gun can go here now" and "a gun could
+ * go here once the crew have been at it": a two- or three-tile battery no longer
+ * finds its yard by accident along a road, so the policy has to be able to ask
+ * the second question and then cut for the answer.
+ */
+function gunShape(s, h, towerIndex, mayCut) {
+  const out = [];
+  for (const p of C.towerTiles(towerIndex, h.q, h.r)) {
+    const t = St.tileAt(s, p.q, p.r);
+    if (!t || t.occupant) return null;
+    if (St.isBuildable(s, t, true)) { out.push(t); continue; }
+    if (!mayCut || !St.isClearable(s, t)) return null;
+    out.push(t);
+  }
+  return out;
+}
+
 /**
  * Where a gun earns its keep. Ranges are short now, so a ring around the ship
  * is decoration — what matters is covering the road the units actually walk in
- * on. Score every buildable tile by how much of the entry road falls inside its
- * range, and take the best.
+ * on. Score every site whose whole shape the ground will take by how much of
+ * the entry road falls inside its range, and take the best.
  */
-function towerSpot(s, radius) {
-  const net = [...St.roadNetwork(s)].map((k) => {
+function towerSpot(s, radius, towerIndex, mayCut = false) {
+  const net = [...St.shipNetwork(s)].map((k) => {
     const [q, r] = k.split(',').map(Number);
     return { q, r };
   });
   if (!net.length) return null;
-  const range = C.TOWERS[1].range;
+  const range = C.TOWERS[towerIndex] ? C.TOWERS[towerIndex].range : C.TOWERS[1].range;
   let best = null, bestScore = -1;
   for (let d = 1; d <= radius + 6; d++) {
     for (const h of H.ring(s.base, d)) {
-      if (!B.canBuildTower(s, h.q, h.r).ok) continue;
+      if (mayCut) {
+        if (!gunShape(s, h, towerIndex, true)) continue;
+      } else if (!B.canBuildTower(s, h.q, h.r, towerIndex).ok) continue;
       if (s.orders.some((o) => o.q === h.q && o.r === h.r)) continue;
       if (s.towers.some((t) => H.distance(t, h) < 2)) continue;
       // road tiles this gun would cover, weighted towards the ship: the last
@@ -183,8 +275,16 @@ function towerSpot(s, radius) {
 const DEFAULTS = {
   towerRing: 4,        // how far out the gun line sits
   // Every tower takes its own fitting, so a gun line of one kind concentrates
-  // the gold instead of splitting it eight ways. 1 is the Culverin Battery,
-  // range 4 — the widest arc on the shelf.
+  // the money instead of splitting it eight ways. 1 is the Culverin Battery,
+  // range 4 — the widest arc on the shelf, and Workshop work.
+  //
+  // Its fitting is iron, and one Forge makes one iron a turn against a
+  // fitting's six, so the line looks unaffordable on paper. The dock's counter
+  // is what makes it: gold out of the chests, over the counter, back as iron.
+  // The gold shelf — Dynamite and the beasts, bought whole off the Merchant —
+  // needs one building fewer and was tried first; over six seeds it holds the
+  // waves worse than a range-4 arc does, because what kills this run is a lane
+  // the guns cannot reach across.
   towerKind: 1,
   // A real gun line: act 3's waves cannot be held by two guns. Five towers of
   // two kinds, every one pushed to tier 5, and the two of the minor kind fed to
@@ -218,8 +318,9 @@ function policy(s, k, m) {
   }
 
   // --- 2 · the build order. One wish list, take the first thing affordable.
-  //     Gold is the whole defence: a chest pays 220 gold, a tier-5 tower is
-  //     39 dps against a tier-1's 1, and gold is the only thing that buys guns.
+  //     Gold is the whole early defence: a chest pays 220 gold, a tier-5 tower
+  //     is 39 dps against a tier-1's 1, and gold buys guns as fast as the
+  //     chests come in — once the Merchant that sells them is standing.
   // Ten hands is the entire budget until a flare lands, so the list is short
   // and every entry has to earn its crew. A Bunkhouse first: it halves the
   // manning on everything near it, which is worth more than any single gun.
@@ -227,6 +328,10 @@ function policy(s, k, m) {
   const wish = [];
   if (!built(s, 'bunkhouse').length) wish.push({ b: 'bunkhouse' });
   if (camps < 1) wish.push({ b: 'excavation' });
+  // The house that supplies the gun line's fitting, before the gun line: a
+  // fitting is crafted at a Workshop or bought off a Peculiar Merchant and got
+  // nowhere else, so without it every tower below is an order that is refused.
+  for (const house of gunHouses(k)) if (!built(s, house).length) wish.push({ b: house });
   for (let i = 0; i < 2; i++) wish.push({ tower: true });
   if (!built(s, 'sappers').length && s.turn >= k.sappersFrom) wish.push({ b: 'sappers' });
   // no evolution without it, and no holding act 3 without an evolution
@@ -257,8 +362,6 @@ function policy(s, k, m) {
   for (const w of wish) {
     if (w.tower) {
       if (s.towers.length >= k.maxTowers) continue;
-      const spot = towerSpot(s, k.towerRing);
-      if (!spot) continue;
       // the minor kind exists only to be evolved with the major one
       const mate = evolutionPartners(k.towerKind).filter((i) => i < C.TOWERS.length)[0];
       const haveMate = s.towers.filter((t) => t.towerIndex === mate).length;
@@ -266,12 +369,19 @@ function policy(s, k, m) {
       // it must never come at the cost of having any gun at all
       const order = s.towers.length < 2 || mate === undefined || haveMate >= k.mateShare
         ? [k.towerKind, mate] : [mate, k.towerKind];
+      // The site is looked for per kind, because the kinds want different
+      // ground: a gun's yard is one to three tiles and settled for life, so a
+      // spot that takes a Swivel Gun Post need not take a Culverin Battery.
       let put = false;
       for (const kind of order) {
         if (kind === undefined) continue;
+        const spot = towerSpot(s, k.towerRing, kind);
+        if (!spot) continue;
         if (O.enqueue(s, { type: 'buildTower', q: spot.q, r: spot.r, towerIndex: kind }).ok) { put = true; break; }
       }
       if (put) break;
+      // nowhere open enough for any of them — cut the yard rather than wait
+      if (clearGunPad(s, k.towerRing, order.filter((x) => x !== undefined))) break;
       continue;
     }
     const spot = w.b === 'excavation' ? campSpot(s) : buildingSpot(s, w.b);
@@ -302,10 +412,18 @@ function policy(s, k, m) {
   const mateKind = evolutionPartners(k.towerKind).filter((i) => i < C.TOWERS.length)[0];
   const kinds = [...new Set([k.towerKind, mateKind, ...s.towers.map((t) => t.towerIndex)])]
     .filter((i) => i !== undefined);
+  // top the iron up over the counter, if the line is Workshop work and a dock
+  // is open: gold is what the camps make, and iron is what the Workshop eats
+  if (kinds.some((i) => C.itemSource(i) === 'iron')) {
+    const price = B.itemCraftCost(s);
+    while (s.res.iron < price * 2
+      && s.res.gold > k.goldReserve + C.TRADE.iron.buy * price
+      && O.trade(s, { res: 'iron', dir: 'buy', amount: price }).ok) { /* again */ }
+  }
   let bought = 0;
   while (kinds.length && bought < 40) {
     const kind = kinds[bought % kinds.length];
-    if (!O.enqueue(s, { type: 'buyItem', tower: kind }).ok) break;
+    if (!O.enqueue(s, itemOrder(kind)).ok) break;
     bought++;
   }
   // Merging greedily starves the yard. An emplacement takes whatever tier it is
@@ -348,7 +466,7 @@ function policy(s, k, m) {
   //     face if that is what it takes.
   const camp = built(s, 'sappers')[0];
   if (camp && St.isBuildingManned(s, camp)) {
-    const reachable = s.spawners.filter((sp) => sp.alive && roadReaches(s, sp) &&
+    const reachable = s.spawners.filter((sp) => sp.alive && networkReaches(s, sp) &&
       !s.assaults.some((a) => a.targetSpawnerId === sp.id));
     for (const sp of reachable) {
       // the officers whose verb keeps working while they are away lead first
@@ -358,19 +476,27 @@ function policy(s, k, m) {
       const order = { type: 'scheduleAssault', spawnerId: sp.id, leader: leader ? leader.id : null };
       if (O.enqueue(s, order).ok) { m.assaults++; continue; }
 
-      // could not go: free what it needs, and it goes next turn instead
+      // Could not go: free what it needs and ask again in the same breath.
+      // Standing a worker down is instant, so the bodies are loose inside this
+      // phase and the team marches this turn rather than next — which it has
+      // to, because the labour below is about to put any idle hand it finds
+      // straight back on the frontier.
       if (!leader) {
-        const held = s.crew.assignments.find((a) => a.kind !== 'assault' &&
-          (officerById(s, a.who)?.quality ?? 0) >= 1 && a.kind === 'clear');
-        if (held) O.enqueue(s, { type: 'reassign', assignmentId: held.id, kind: 'idle' });
+        const held = s.crew.assignments.find((a) => a.kind === 'clear' &&
+          (officerById(s, a.who)?.quality ?? 0) >= 1);
+        if (held) O.standDown(s, held.id);
       }
-      const need = A.assaultHands(s) - (leader ? 1 : 0) - St.idleHands(s);
+      const lead = leader || ['item', 'assault', 'man', 'clear']
+        .map((role) => idleOfficer(s, role))
+        .find((o) => o && o.quality >= 1) || null;
+      const need = A.assaultHands(s) - (lead ? 1 : 0) - St.idleHands(s);
       for (let i = 0; i < need; i++) {
-        const digger = s.crew.assignments.find((a) => a.kind === 'clear' && St.isHand(a.who) &&
-          !s.orders.some((o) => o.assignmentId === a.id));
+        const digger = s.crew.assignments.find((a) => a.kind === 'clear' && St.isHand(a.who));
         if (!digger) break;
-        O.enqueue(s, { type: 'reassign', assignmentId: digger.id, kind: 'idle' });
+        O.standDown(s, digger.id);
       }
+      const retry = { type: 'scheduleAssault', spawnerId: sp.id, leader: lead ? lead.id : null };
+      if (O.enqueue(s, retry).ok) { m.assaults++; continue; }
       break;
     }
   }
@@ -381,7 +507,7 @@ function policy(s, k, m) {
   //     living spawner, because nothing else can end the run.
   // the nearest spawner that has no road to it yet — so the gang carries on
   // toward the second one while the first team is still marching
-  const target = s.spawners.filter((x) => x.alive && !roadReaches(s, x))
+  const target = s.spawners.filter((x) => x.alive && !roadedTo(s, x))
     .sort((a, b) => H.distance(a, s.base) - H.distance(b, s.base))[0];
   const driving = s.turn >= k.digRoadFrom && !!target;
 
@@ -458,7 +584,7 @@ export function playRun(seed, opts = {}) {
     const { events, turn } = playTurn(s);
 
     if (!campTurn && working(s, 'sappers')) campTurn = turn;
-    if (!roadTurn && s.spawners.some((x) => x.alive && roadReaches(s, x))) roadTurn = turn;
+    if (!roadTurn && s.spawners.some((x) => x.alive && networkReaches(s, x))) roadTurn = turn;
     for (const e of events) {
       if (e.kind === 'spawnerDied' && !firstKill) firstKill = turn;
       if (e.kind === 'combatEnd') for (const rn of e.ruined || []) m.ruined = (m.ruined || 0) + 1;

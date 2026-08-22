@@ -6,8 +6,8 @@
 |---|---|---|
 | **wood** | clearing forest, canopy, scrub | tower structures, bridges, buildings, flares, hull repair |
 | **stone** | clearing stone tiles | tower structures, buildings, Forge input |
-| **iron** | the Forge (3 stone → 1 iron per turn) | crafting items, flares |
-| **gold** | treasure caches (100 each), the Trading Dock, Monkey Riggers kills | buying items, unmanning buildings |
+| **iron** | the Forge (3 stone → 1 iron per turn), iron seams | crafting items at a Workshop, flares |
+| **gold** | treasure caches (100 each), the Trading Dock, Monkey Riggers kills | buying items at a Peculiar Merchant, unmanning buildings |
 
 **Wood and stone build the emplacement. Iron and gold buy the gun.** A player can
 be rich in one and starving in the other; that is intended.
@@ -31,13 +31,22 @@ a bar. It updates live as the player reassigns.
 ### Building
 
 A tower is **built at the tier of the fitting it takes**: 30 wood + 20 stone for
-the emplacement, plus one fitting of its own kind out of the hold, of any tier.
-The **lowest** tier held is the one spent, so a better gun is never used up on
-an emplacement a worse one would have raised. Tier decides the footprint and the
-manning, as it does for a fitting put in later. It cannot be built:
+the emplacement, plus one fitting of its own kind out of the hold. **Which tier
+to spend is the player's choice** — the Towers panel offers a Build button per
+tier held, up to the highest. The **lowest** is the default and usually the right
+one, since a standing tower rises by having a better fitting put in and so
+reaches the same place for less; but a high fitting with nothing pressing to fit
+it to is worth more in the ground today than a turn later. Tier decides the
+manning; the **footprint belongs to the gun** and is the same at every tier.
+
+A gun is picked off the **Towers** panel in the bar and then placed on the map:
+its silhouette follows the cursor, green where the ground will take it, with its
+range ring drawn around it. It cannot be built:
 
 - on `sand`, `salt`, `freshwater` (unbridged), `saltwater`, or an occupied tile
+- where any tile of its shape is not free, cleared and buildable
 - within `EXCLUSION_RADIUS = 7` of a living spawner
+- where no tile beside the yard is ground the crew can walk to
 
 `cliff` accepts towers and nothing else, and gives +1 range.
 
@@ -46,17 +55,19 @@ manning, as it does for a fitting put in later. It cannot be built:
 A tower rises by having a **higher-tier item fitted in place**. The displaced
 item returns to inventory. There is no other way to reach tier 2+.
 
-| tier | power | manning | footprint |
-|---:|---:|---:|---:|
-| 1 | 1.00 | 1 | 1 |
-| 2 | 2.50 | 1 | 1 |
-| 3 | 6.25 | 1 | 1 |
-| 4 | 15.63 | 2 | 2 |
-| 5 | 39.06 | 2 | 2 |
-| evolved | 97.66 | 3 | 3 |
+| tier | power | manning |
+|---:|---:|---:|
+| 1 | 1.00 | 1 |
+| 2 | 2.50 | 1 |
+| 3 | 6.25 | 1 |
+| 4 | 15.63 | 2 |
+| 5 | 39.06 | 2 |
+| evolved | 97.66 | 3 |
 
-When a tower's footprint grows, the extra tiles must be free, cleared and
-buildable, or the fit is refused.
+A tower's ground never changes. The fit is about the gun, not about the plot:
+the emplacement is already standing, and nothing beside it can be built over in
+the meantime to make a fitting the player has paid for illegal. An **evolution**
+consumes the partner and its ground; the survivor keeps its own shape.
 
 ### Manning
 
@@ -82,8 +93,12 @@ effect layered on its own firing shape.
 
 ## §4 · Items
 
-- Bought at the ship or a Trading Dock for **8 gold**; crafted at a Workshop for
-  **6 iron**. The Weapons Master makes both 25% cheaper.
+- Each fitting has **one house and one only**. The ironwork — Swivel Gun,
+  Culverin, Chain-Shot — is crafted at a **Workshop** for **6 iron**; the other
+  five are bought off a **Peculiar Merchant** for **8 gold**. What is crafted
+  cannot be bought and what is bought cannot be crafted, and neither can be had
+  before its house is built and manned. The Weapons Master makes both 25%
+  cheaper.
 - **Two items of the same tier merge into one of the next.** Merging is free and
   happens only in inventory.
 - A tier-*n* item is worth `2^(n-1)` tier-1 items: 1 · 2 · 4 · 8 · 16.
@@ -103,8 +118,9 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 |---|---:|---|---|
 | Warehouse | 3 | inventory | the hold becomes unlimited |
 | Forge | 2 | iron | 3 stone → 1 iron per turn |
-| Workshop | 3 | crafting | items craftable at 6 iron |
-| Trading Dock | 3 | the surplus | 12 wood or stone → 1 gold per turn |
+| Workshop | 3 | ironwork | the iron fittings craftable at 6 iron |
+| Trading Dock | 3 | the surplus | 12 wood or stone → 1 gold per turn, and a counter to trade over |
+| Peculiar Merchant | 3 | oddities | the gold fittings buyable at 8 gold; runs on 1 hand |
 | Tinker's Shed | 3 | evolution | evolutions become possible |
 | Sappers' Camp | 3 | offence | assault teams can be raised |
 | Hospital | 2 | downtime | assault downtime 3 → 1 turn |
@@ -113,6 +129,12 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 | Bunkhouse | 2 | manning | buildings within radius 3 cost 1 hand |
 
 Excavation Camp and Bunkhouse may be built repeatedly; the rest are one each.
+
+**The dock counter.** Beside its standing trade, a manned Trading Dock buys and
+sells wood, stone and iron to order in whatever amount. It is instant — no turn,
+no hand, nothing queued — and it deals in whole gold: it pays 1 gold for 12 wood
+or 12 stone and asks 2 for the same, and pays 1 for an iron and asks 2. What the
+order queue has already spent is not on the counter.
 
 Buildings occupy multiple contiguous tiles, all of which must be cleared,
 buildable and free.

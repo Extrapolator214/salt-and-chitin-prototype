@@ -2,7 +2,7 @@
 // This is the only place sim/ and view/ meet.
 
 import C from './sim/config.js';
-import { createState, tileAt, isBuildable, isClearable, idleHands, roadNetwork } from './sim/state.js';
+import { createState, tileAt, isClearable, idleHands } from './sim/state.js';
 import * as St from './sim/state.js';
 import * as H from './sim/hex.js';
 import { resolveTurn, concludeTurn } from './sim/turn.js';
@@ -16,6 +16,7 @@ import { renderHover } from './view/hover.js';
 import { renderLog } from './view/log.js';
 import * as modals from './view/modals.js';
 import * as reel from './view/reel.js';
+import * as save from './save.js';
 
 const canvas = document.getElementById('map');
 const hudEl = document.getElementById('hud');
@@ -31,22 +32,48 @@ const reelPanel = document.getElementById('reel-panel');
 
 const params = new URLSearchParams(location.search);
 const seedFromUrl = Number(params.get('seed'));
+let wantSeed = Number.isFinite(seedFromUrl) && seedFromUrl ? seedFromUrl : null;
 
-let state = createState(Number.isFinite(seedFromUrl) && seedFromUrl ? seedFromUrl : C.DEFAULT_SEED);
+/**
+ * The run this page opens on.
+ *
+ * The stored run wins, because a reload is not a decision — the player pressed
+ * F5, or the tab woke up, and losing an hour's island to that is the one thing
+ * a prototype with no save at all does worst. `?seed=` still overrides it, but
+ * only when it names a *different* island: reloading a seeded URL is as much a
+ * reload as any other, and it should come back to where it left off rather than
+ * wiping the run every time.
+ *
+ * With nothing stored and nothing asked for, the seed is today's date, so a
+ * fresh visit is a fresh island and two people on the same day get the same one.
+ */
+function openingState() {
+  const stored = save.load();
+  if (stored && (wantSeed === null || wantSeed === stored.seed)) return stored;
+  if (stored) save.clear();
+  return createState(wantSeed ?? save.todaySeed());
+}
+
+let state = openingState();
 const cam = createCamera();
 const ui = {
   hover: null,
-  placing: null,       // a building type following the cursor
+  // What is waiting to be put down, following the cursor: either
+  // {kind:'building', type} or {kind:'tower', towerIndex}. Both are picked off
+  // a panel in the bar and placed with a click on the map.
+  placing: null,
   pendingEvents: [],
   reel: null,          // the resolve being played back, or null between turns
   walk: null,          // mid-stride positions, set only during a walk beat
   revealing: null,     // sites worked this turn whose pane has not played yet
   ground: null,        // ground the labour changed, held while the walk plays
   // A setting rather than a per-reel control: chosen once and kept for the run.
+  // `1`, `3`, or `'skip'` — which is not a speed at all but the same decision
+  // made once: resolve the turn and get on with it, with nothing to watch.
   reelSpeed: 1,
   located: null,       // a tile pinned by "locate", until the next click
   revoke: (id) => { O.revoke(state, id); refresh(); },
-  place: (building) => { ui.placing = building; refresh(); },
+  place: (what) => { ui.placing = what; refresh(); },
   /**
    * Put a tile under the camera and leave a mark on it.
    *
@@ -62,22 +89,50 @@ const ui = {
     refresh();
   },
   order: (o) => { const r = O.enqueue(state, o); if (!r.ok) flash(r.why); return r; },
+  // One of the two things that are not orders: goods over the dock's counter,
+  // paid for and handed across on the spot. It moves the stores, so it goes through the
+  // same refusal path as an order — and through `refresh`, which is what writes
+  // the run to storage.
+  trade: (t) => { const r = O.trade(state, t); if (!r.ok) flash(r.why); return r; },
+  // Nor is standing a worker down: it releases a body and moves nothing, so
+  // there is nothing for a resolve to carry out and no reason to make the
+  // player wait a turn to put them back to work.
+  standDown: (id) => { const r = O.standDown(state, id); if (!r.ok) flash(r.why); return r; },
   refresh,
   endTurn: () => endTurn(true),
   // Named seed or none: the modal always names one, so the walk is only the
   // fallback for anything that starts a run without asking which island.
-  newRun: (seed) => {
-    state = createState(seed || modals.nextSeed(state.seed));
-    ui.pendingEvents = [];
-    ui.located = null;
-    lookAt = null;
-    endReel();
-    modals.close(ui);
-    resize();
-    centreOn(cam, canvas, state.base.q, state.base.r);
-    refresh();
-  },
+  newRun: (seed) => start(createState(seed || modals.nextSeed(state.seed))),
+  // The same island, from the first turn. A run is a line through one map, and
+  // wanting to take that line again is not the same wish as wanting a new map —
+  // which is the only thing "New run" could offer until now.
+  restart: () => start(createState(state.seed)),
 };
+
+/** Put a freshly built run on the screen, over whatever was there. */
+function start(next) {
+  save.clear();
+  state = next;
+  // Keep `?seed=` naming the run that is actually on the screen. Without this,
+  // rolling a new island from a seeded URL left the address bar pointing at the
+  // old one — and since a URL seed that disagrees with the stored run is read as
+  // "give me that island instead", the next reload would have thrown the new run
+  // away and rebuilt the one the player had just left.
+  if (wantSeed !== null && next.seed !== wantSeed) {
+    params.set('seed', String(next.seed));
+    history.replaceState(null, '', `${location.pathname}?${params}`);
+    wantSeed = next.seed;
+  }
+  ui.pendingEvents = [];
+  ui.located = null;
+  ui.placing = null;
+  lookAt = null;
+  endReel();
+  modals.close(ui);
+  resize();
+  centreOn(cam, canvas, state.base.q, state.base.r);
+  refresh();
+}
 
 // ---- layout ----------------------------------------------------------------
 
@@ -124,6 +179,14 @@ function refresh() {
   const note = document.getElementById('crewnote');
   note.textContent = spare > 0 ? `${spare} spare` : 'nobody spare';
   note.className = spare > 0 ? 'dim' : 'bad';
+
+  // Written here rather than at a handful of call sites, because `refresh` is
+  // already the one thing that means "the run changed": anything that moves the
+  // run redraws the panels, so hanging the save off it is what makes it
+  // impossible to change the run without recording it. It costs 3 KB and a
+  // fraction of a millisecond, and it declines to write anything at all unless
+  // the state is at a turn boundary.
+  save.save(state);
 }
 
 function renderQueue() {
@@ -179,7 +242,9 @@ function endTurn(confirmed = false) {
   const before = reel.snapshotMovers(state);
   ui.pendingEvents = resolveTurn(state);
 
-  ui.reel = reel.build(state, ui.pendingEvents, before);
+  // Skipping is the setting, not a button pressed halfway through: there is no
+  // reel to build, so nothing takes the camera and nothing has to be got past.
+  ui.reel = ui.reelSpeed === 'skip' ? null : reel.build(state, ui.pendingEvents, before);
   if (ui.reel) {
     ui.reel.speed = ui.reelSpeed;
     camBeforeReel = { x: cam.x, y: cam.y };
@@ -287,9 +352,13 @@ function renderReelPanel() {
   reelPanel.querySelectorAll('[data-r]').forEach((b) => {
     b.onclick = () => {
       const v = b.dataset.r;
-      if (v === 'skip') return skipReel();
-      ui.reelSpeed = Number(v);
-      if (ui.reel) ui.reel.speed = ui.reelSpeed;
+      ui.reelSpeed = v === 'skip' ? 'skip' : Number(v);
+      // Pressed while one is playing, the setting answers that reel too — the
+      // player asking never to watch these has plainly finished with this one.
+      if (ui.reel) {
+        if (ui.reelSpeed === 'skip') return skipReel();
+        ui.reel.speed = ui.reelSpeed;
+      }
       renderReelPanel();                               // repaint the pressed state
     };
   });
@@ -330,9 +399,15 @@ function finishTurn() {
   strip.hidden = true;
 
   const assault = events.find((e) => e.kind === 'assault');
+  // The end of the run is not a turn report and is never skipped — there is no
+  // next phase to get on with, and the one thing left to say is how it went.
+  // The other two are reports of a resolve, which is what skipping asks not to
+  // be shown: the turn is over and the map is back.
   if (state.outcome) modals.open('endOfRun', {}, ui);
-  else if (assault) modals.open('assaultResult', { event: assault }, ui);
-  else modals.open('turnSummary', { events }, ui); // every turn closes with a report
+  else if (ui.reelSpeed !== 'skip') {                // every turn closes with a report
+    if (assault) modals.open('assaultResult', { event: assault }, ui);
+    else modals.open('turnSummary', { events }, ui);
+  }
   refresh();
 }
 
@@ -457,9 +532,12 @@ function assignClearAt(h) {
 function clickTile(h) {
   const t = tileAt(state, h.q, h.r);
   if (!t) return;
-  // placing a building: the click puts it down
+  // something waiting to be put down: the click puts it there
   if (ui.placing) {
-    const r = O.enqueue(state, { type: 'buildBuilding', building: ui.placing, q: h.q, r: h.r });
+    const order = ui.placing.kind === 'tower'
+      ? { type: 'buildTower', q: h.q, r: h.r, towerIndex: ui.placing.towerIndex, tier: ui.placing.tier }
+      : { type: 'buildBuilding', building: ui.placing.type, q: h.q, r: h.r };
+    const r = O.enqueue(state, order);
     if (!r.ok) { flash(r.why); return; }
     ui.placing = null;
     refresh();
@@ -471,8 +549,10 @@ function clickTile(h) {
     if (t.occupant.kind === 'spawner') return modals.open('assault', {}, ui);
     if (t.occupant.kind === 'base') return modals.open('ship', {}, ui);
   }
-  // a chest or a wreck still to be worked comes before an empty building plot
-  if (!poiReady(state, t) && isBuildable(state, t, true)) return modals.open('buildTower', { q: h.q, r: h.r }, ui);
+  // Open ground opens the tile's own panel. It used to open the tower catalogue
+  // instead, which put the whole gunnery shelf behind a click on any cleared
+  // hex and hid it entirely behind ground that was not cleared yet — the guns
+  // are picked off the bar now, and a click on a tile is about that tile.
   modals.open('clearTile', { q: h.q, r: h.r }, ui);
 }
 

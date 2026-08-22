@@ -1,11 +1,11 @@
 // The real-time resolve. Fixed 30 Hz timestep; the player gives no input.
 
 import C from './config.js';
-import { key, distance, neighbours, line } from './hex.js';
+import { key, distance, neighbours, line, axialRound } from './hex.js';
 import {
   tileAt, isTargetable, hasSight, addLog, towerPower, towerRange,
 } from './state.js';
-import { roadPath, findPath, advanceCost } from './enemy.js';
+import { openPath, findPath, advanceCost } from './enemy.js';
 import { damageBuilding } from './build.js';
 
 const DT = 1 / C.TICK_HZ;
@@ -106,7 +106,7 @@ export function beginCombat(state, contacts, events) {
   for (const { cohort, entry } of contacts) {
     // the resolve is the assault phase: ground that lets a cohort march past on
     // its way in does not necessarily let a unit charge over it
-    let path = roadPath(state, entry, state.base, 'assault');
+    let path = openPath(state, entry, state.base, 'assault');
     let overland = false;
     if (!path) {
       path = findPath(state, entry, state.base, 'assault');
@@ -131,7 +131,10 @@ export function beginCombat(state, contacts, events) {
       shell: all.filter((u) => u.type === 'shell').length,
       elite: all.filter((u) => u.elite).length,
     },
-    shots: [],
+    // told, not tallied: rounds in the air, and the flashes they leave
+    projectiles: [],
+    impacts: [],
+    nextShot: new Map(),
     ruined: [],
     done: false,
   };
@@ -147,6 +150,62 @@ const tileFor = (state, group, unit) => {
   const i = Math.max(0, Math.min(group.path.length - 1, Math.floor(unit.pos)));
   return tileAt(state, group.path[i].q, group.path[i].r);
 };
+
+// ---- shot on the map -------------------------------------------------------
+// A gun's power is a rate and is spent every tick; a round in the air is not.
+// The projectiles below carry no damage at all — they are how the fight is
+// told, spawned on each gun's own cadence and flown to the spot the target was
+// standing on when the trigger went. Nothing here reads them back.
+
+/** Where a unit is, between hexes, in fractional axial coordinates. */
+function unitAxial(group, u) {
+  const i = Math.max(0, Math.min(group.path.length - 1, Math.floor(u.pos)));
+  const j = Math.min(group.path.length - 1, i + 1);
+  const f = Math.max(0, Math.min(1, u.pos - i));
+  const a = group.path[i], b = group.path[j];
+  return { q: a.q + (b.q - a.q) * f, r: a.r + (b.r - a.r) * f };
+}
+
+/**
+ * Throw a round from `shooter` at where `target` stands.
+ *
+ * At the spot, not at the unit: a shot leads nothing and chases nothing, so a
+ * target that dies mid-flight still gets its round, which is what the fight
+ * looks like. One per gun per cadence, and none at all once the air is full —
+ * a fight run out with nobody watching must not build a list of ten thousand.
+ */
+function throwRound(state, group, shooter, target) {
+  const cb = state.combat;
+  const due = cb.nextShot.get(shooter.key) ?? 0;
+  if (cb.elapsed < due) return;
+  cb.nextShot.set(shooter.key, cb.elapsed + shooter.interval);
+  if (cb.projectiles.length >= C.PROJECTILE_MAX) return;
+  const from = { q: shooter.tile.q, r: shooter.tile.r };
+  const to = unitAxial(group, target);
+  const span = Math.max(C.EPSILON, distance(from, axialRound(to.q, to.r)));
+  cb.projectiles.push({
+    from, to,
+    t: 0,
+    seconds: span / C.PROJECTILE_SPEED,
+    colour: shooter.colour,
+    blast: shooter.shape === 'blast',
+  });
+}
+
+/** Move every round on, and turn the ones that land into a flash. */
+function flyRounds(state) {
+  const cb = state.combat;
+  const live = [];
+  for (const pr of cb.projectiles) {
+    pr.t += DT / pr.seconds;
+    if (pr.t < 1) { live.push(pr); continue; }
+    if (cb.impacts.length < C.PROJECTILE_MAX) {
+      cb.impacts.push({ q: pr.to.q, r: pr.to.r, t: 0, colour: pr.colour, blast: pr.blast });
+    }
+  }
+  cb.projectiles = live;
+  cb.impacts = cb.impacts.filter((im) => (im.t += DT / C.IMPACT_SECONDS) < 1);
+}
 
 function damage(state, group, unit, amountPerSecond, source) {
   const tile = unit.tile;
@@ -226,7 +285,7 @@ function fire(state, group, shooter) {
     damage(state, group, t, afterArmour(portion, t.armour), shooter);
     if (shooter.snag) t.held = true;
   }
-  state.combat.shots.push({ from: shooter.tile, toId: primary.id, group });
+  throwRound(state, group, shooter, primary);
 }
 
 function shooters(state) {
@@ -251,6 +310,10 @@ function shooters(state) {
         snag: tower.essence.includes('Snag'),
         plunder: tower.essence.includes('Plunder'),
         id: tower.id,
+        // an evolved gun fires each of its shapes, and each is its own barrel
+        key: `${tower.id}:${shape}`,
+        interval: C.shotInterval(def.rate),
+        colour: def.colour,
       });
     }
   }
@@ -261,13 +324,15 @@ function shooters(state) {
     shape: 'single',
     snag: false, plunder: false,
     id: 'ship',
+    key: 'ship',
+    interval: C.shotInterval(C.SHIP_SHOT_RATE),
+    colour: C.SHIP_SHOT_COLOUR,
   });
   return out;
 }
 
 function step(state) {
   const cb = state.combat;
-  cb.shots.length = 0;
 
   for (const group of cb.groups) {
     const end = group.path.length - 1;
@@ -310,6 +375,7 @@ function step(state) {
     }
   }
 
+  flyRounds(state);
   cb.elapsed += DT;
 }
 

@@ -2,10 +2,12 @@
 
 import C from '../sim/config.js';
 import { key, distance, axialToPixel, axialRound, spiral, neighbours } from '../sim/hex.js';
-import { tileAt, towerRange, towerManning, roadNetwork, officerById, canopyShadow } from '../sim/state.js';
+import { tileAt, towerRange, towerManning, officerById, canopyShadow } from '../sim/state.js';
 import { queuedTiles, projectedAssignments, workableTiles, projectedCrew, crewGroundAtResolve } from '../sim/orders.js';
 import { clearCapacity, jobPlace } from '../sim/labour.js';
-import { canBuildBuilding, footprintPreview } from '../sim/build.js';
+import {
+  canBuildBuilding, canBuildTower, footprintPreview, coverageOf, coveredBuildings,
+} from '../sim/build.js';
 import { cohortTiles, cohortHidden } from '../sim/enemy.js';
 import { hexSize, axialToScreen, visibleRows, worldToScreen } from './camera.js';
 
@@ -352,7 +354,21 @@ function drawStructures(ctx, state, cam, canvas, S) {
     const p = axialToScreen(cam, canvas, tw.q, tw.r);
     const def = C.TOWERS[tw.towerIndex];
     const manned = towerManning(state, tw).manned;
-    const size = S * (0.6 + 0.12 * (tw.evolved ? 5 : tw.tier));
+    // The emplacement itself: every tile of the yard, in the gun's own colour,
+    // so a two- or three-tile battery reads as one structure rather than as a
+    // marker with some ground behind it. The tier is in the mark on top, which
+    // is the only thing about a tower that changes after it is raised.
+    ctx.save();
+    ctx.globalAlpha = manned ? 0.5 : 0.22;
+    ctx.fillStyle = def.colour;
+    for (const t of tw.footprint) {
+      const c = axialToScreen(cam, canvas, t.q, t.r);
+      ctx.beginPath();
+      hexPath(ctx, c.x, c.y, S * 0.92);
+      ctx.fill();
+    }
+    ctx.restore();
+    const size = S * (0.5 + 0.08 * (tw.evolved ? 5 : tw.tier));
     poly(ctx, p.x, p.y + size * 0.2, size, 3, -Math.PI / 2);
     if (manned) {
       ctx.fillStyle = def.colour;
@@ -499,22 +515,79 @@ function unitScreen(cam, canvas, group, u) {
   return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
 }
 
+/**
+ * What is left of one unit, drawn over its head.
+ *
+ * The bar is the only place the fight says whether the guns are working. A
+ * swarm of dots that thins out tells you the tally afterwards; a rank of bars
+ * draining tells you which end of the road is doing the killing while it is
+ * still happening. Full bars are drawn too — an unmarked cohort walking through
+ * a gun's arc is exactly the thing worth seeing.
+ *
+ * Below HP_BAR_MIN_HEX the units are three pixels across and a bar over them
+ * would be a smear, so it is dropped rather than drawn badly.
+ */
+const HP_BAR_MIN_HEX = 8;
+
+function drawHealthBar(ctx, p, rad, u) {
+  const w = Math.max(8, rad * 3.2);
+  const h = Math.max(2, rad * 0.55);
+  const x = p.x - w / 2;
+  const y = p.y - rad - h - 2;
+  const frac = Math.max(0, Math.min(1, u.hp / u.maxHp));
+  ctx.fillStyle = 'rgba(12,14,18,0.75)';
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = frac > 0.6 ? '#6fa86a' : frac > 0.3 ? '#d9a441' : '#c8503a';
+  ctx.fillRect(x, y, w * frac, h);
+  // A shield-bearer's plate sits on top of its own health and is spent first,
+  // so it is drawn as its own band above the bar rather than mixed into it.
+  if (u.shieldHp > 0) {
+    const sf = Math.max(0, Math.min(1, u.shieldHp / C.SHIELD_HP));
+    ctx.fillStyle = '#7fa8d0';
+    ctx.fillRect(x, y - h - 1, w * sf, Math.max(1, h * 0.5));
+  }
+}
+
+/** Rounds in the air, and the flashes where they landed. */
+function drawShot(ctx, state, cam, canvas, S) {
+  const cb = state.combat;
+  for (const pr of cb.projectiles) {
+    const a = axialToScreen(cam, canvas, pr.from.q, pr.from.r);
+    const b = axialToScreen(cam, canvas, pr.to.q, pr.to.r);
+    const x = a.x + (b.x - a.x) * pr.t;
+    const y = a.y + (b.y - a.y) * pr.t;
+    // a short tail behind it, so the direction reads at a glance
+    const tail = Math.max(0, pr.t - 0.12);
+    ctx.strokeStyle = pr.colour;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = Math.max(1, S * 0.09);
+    ctx.beginPath();
+    ctx.moveTo(a.x + (b.x - a.x) * tail, a.y + (b.y - a.y) * tail);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = pr.colour;
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(1.2, S * (pr.blast ? 0.2 : 0.12)), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const im of cb.impacts) {
+    const p = axialToScreen(cam, canvas, im.q, im.r);
+    const grow = im.blast ? C.BLAST_RADIUS + 0.5 : 0.5;
+    ctx.strokeStyle = im.colour;
+    ctx.globalAlpha = 0.7 * (1 - im.t);
+    ctx.lineWidth = Math.max(1, S * 0.12);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(2, S * grow * (0.3 + im.t)), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
 function drawCombat(ctx, state, cam, canvas, S) {
   const cb = state.combat;
+  drawShot(ctx, state, cam, canvas, S);
   for (const g of cb.groups) {
-    ctx.strokeStyle = 'rgba(255,240,200,0.55)';
-    ctx.lineWidth = 1;
-    for (const shot of cb.shots) {
-      if (shot.group !== g) continue;
-      const target = g.units.find((u) => u.id === shot.toId);
-      if (!target) continue;
-      const a = axialToScreen(cam, canvas, shot.from.q, shot.from.r);
-      const b = unitScreen(cam, canvas, g, target);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.stroke();
-    }
     for (const u of g.units) {
       if (!u.alive) continue;
       const p = unitScreen(cam, canvas, g, u);
@@ -537,6 +610,7 @@ function drawCombat(ctx, state, cam, canvas, S) {
         ctx.arc(p.x, p.y, rad + 3, 0, Math.PI * 2);
         ctx.stroke();
       }
+      if (S >= HP_BAR_MIN_HEX) drawHealthBar(ctx, p, rad, u);
     }
   }
 }
@@ -706,10 +780,12 @@ export function jobLines(state) {
     if (a.kind === 'assault') continue;               // away with the team
     const who = a.queued ? byOrder.get(a.id) : a.who;
     if (!who || out.has(who)) continue;
-    const to = jobPlace(state, a);
-    if (!to) continue;
     const m = state.crew.members.find((x) => x.id === who);
-    if (!m || (m.q === to.q && m.r === to.r)) continue;   // already standing on it
+    if (!m) continue;
+    // asked of the body, so a hand standing on the far corner of a house he is
+    // to man is already there and gets no line drawn across it
+    const to = jobPlace(state, a, m);
+    if (!to || (m.q === to.q && m.r === to.r)) continue;   // already standing on it
     out.set(who, to);
   }
   lineCache = { key: k, map: out };
@@ -865,10 +941,13 @@ function drawBatchGlow(ctx, state, cam, canvas, S) {
 }
 
 /**
- * The building being placed, following the cursor. The silhouette never
- * reshapes itself around an obstacle — it is drawn tile by tile, each one green
- * or red on its own account, so "1 short" points at the tile that is short
- * instead of condemning the other three with it.
+ * The structure being placed, following the cursor — a yard or a gun, since a
+ * tower is placed exactly as a building is now: picked off a panel in the bar,
+ * carried over the map, put down with a click.
+ *
+ * The silhouette never reshapes itself around an obstacle — it is drawn tile by
+ * tile, each one green or red on its own account, so "1 short" points at the
+ * tile that is short instead of condemning the other three with it.
  *
  * A refusal that is about no one tile — the type is already built, the plot is
  * inside its neighbour's halo — has no tile to point at, so the whole shape
@@ -876,13 +955,52 @@ function drawBatchGlow(ctx, state, cam, canvas, S) {
  */
 function drawPlacement(ctx, state, cam, canvas, S, ui) {
   if (!ui.placing || !ui.hover) return;
-  const def = C.buildingDef(ui.placing);
-  if (!def) return;
   const { q, r } = ui.hover;
-  const check = canBuildBuilding(state, ui.placing, q, r);
-  const tiles = footprintPreview(state, q, r, def.tiles, false, ui.placing);
+  const tower = ui.placing.kind === 'tower';
+  const def = tower ? C.TOWERS[ui.placing.towerIndex] : C.buildingDef(ui.placing.type);
+  if (!def) return;
+  const check = tower
+    ? canBuildTower(state, q, r, ui.placing.towerIndex, ui.placing.tier)
+    : canBuildBuilding(state, ui.placing.type, q, r);
+  const tiles = tower
+    ? footprintPreview(state, q, r, ui.placing.towerIndex, true)
+    : footprintPreview(state, q, r, def.tiles, false, ui.placing.type);
   const blanket = !check.ok && tiles.every((t) => t.ok);
   const takes = (t) => t.ok && !blanket;
+
+  // A Bunkhouse is placed for its reach, so the reach is drawn before anything
+  // else and the yards it would take in are ringed inside it. Painted under the
+  // silhouette: it is the ground the effect covers, not part of the plot.
+  const cover = tower ? null : coverageOf(state, ui.placing.type, tiles);
+  const covered = coveredBuildings(state, cover);
+  if (cover) {
+    ctx.save();
+    // Filled and lightly outlined hex by hex. The outline is what makes the
+    // blob read as a region rather than as a wash — over pale sand the fill
+    // alone is nearly the same colour as the ground it covers.
+    ctx.fillStyle = 'rgba(120, 190, 240, 0.20)';
+    ctx.strokeStyle = 'rgba(140, 200, 245, 0.28)';
+    ctx.lineWidth = 1;
+    for (const k of cover) {
+      const [cq, cr] = k.split(',').map(Number);
+      const c = axialToScreen(cam, canvas, cq, cr);
+      ctx.beginPath();
+      hexPath(ctx, c.x, c.y, S);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(150, 210, 255, 0.9)';
+    ctx.lineWidth = 2;
+    for (const b of covered) {
+      for (const t of b.tiles) {
+        const c = axialToScreen(cam, canvas, t.q, t.r);
+        ctx.beginPath();
+        hexPath(ctx, c.x, c.y, S * 0.9);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
 
   for (const t of tiles) {
     const p = axialToScreen(cam, canvas, t.q, t.r);
@@ -900,11 +1018,30 @@ function drawPlacement(ctx, state, cam, canvas, S, ui) {
     ctx.stroke();
   }
 
+  // A gun is placed for its arc, so the arc is what the cursor carries. The
+  // cliff bonus is in it: standing one hex over is worth a tile of range, and
+  // that is a decision made while the outline is still moving.
+  if (tower) {
+    const t = tileAt(state, q, r);
+    const reach = def.range + (t && t.terrain === 'cliff' ? C.CLIFF_RANGE_BONUS : 0);
+    ringAt(ctx, cam, canvas, q, r, reach, S, 'rgba(255,255,255,0.5)', true);
+  }
+
   const anchor = axialToScreen(cam, canvas, q, r);
   ctx.font = '12px ui-monospace, monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  const text = check.ok ? `${def.name} — click to place` : (check.why || 'cannot build here');
+  // What the plot is worth, not just whether it is legal: a Bunkhouse that
+  // covers nothing is a legal placement and a wasted one.
+  const worth = cover
+    ? ` — covers ${covered.length} yard${covered.length === 1 ? '' : 's'}`
+    : '';
+  // The tier is part of what is being placed, so it is on the label: two
+  // Culverin Batteries carried over the same ground are not the same gun.
+  const at = tower && ui.placing.tier ? ` (tier ${ui.placing.tier})` : '';
+  const text = check.ok
+    ? `${def.name}${at}${worth} — click to place`
+    : (check.why || 'cannot build here') + worth;
   ctx.fillStyle = 'rgba(10,12,15,0.8)';
   const w = ctx.measureText(text).width + 10;
   ctx.fillRect(anchor.x - w / 2, anchor.y - S * 2.6, w, 16);

@@ -6,7 +6,7 @@ import C from './config.js';
 import { key, distance, neighbours, spiral } from './hex.js';
 import {
   tileAt, isBuildable, touchMap, addLog, nextId, holdFree, hasBuilding,
-  buildingsOfType, towerManning, officerById, officerFor, roadNetwork,
+  buildingsOfType, towerManning, officerById, officerFor, shipNetwork,
   walkableForWork,
 } from './state.js';
 
@@ -100,11 +100,32 @@ function queuedPlots(state) {
   return out;
 }
 
-/** Every tile a queued building will stand on, whatever kind it is. */
+/**
+ * The same, for towers. A gun stands on one to three tiles now, so a queued
+ * emplacement speaks for ground exactly as a queued yard does — two towers
+ * ordered onto overlapping plots in one turn would otherwise both be legal, and
+ * the second refused when the queue ran.
+ */
+function queuedTowerPlots(state) {
+  const out = [];
+  for (const o of state.orders || []) {
+    if (o.type !== 'buildTower') continue;
+    out.push({ towerIndex: o.towerIndex, tiles: C.towerTiles(o.towerIndex, o.q, o.r) });
+  }
+  return out;
+}
+
+/** Every tile a queued structure will stand on, tower or yard alike. */
 export function claimedTiles(state) {
   const set = new Set();
   for (const p of queuedPlots(state)) for (const t of p.tiles) set.add(key(t.q, t.r));
+  for (const p of queuedTowerPlots(state)) for (const t of p.tiles) set.add(key(t.q, t.r));
   return set;
+}
+
+/** Yards of this type the queue has already spoken for. */
+export function queuedBuildingsOfType(state, type) {
+  return queuedPlots(state).filter((p) => p.type === type);
 }
 
 /** The ground the ship herself stands on. */
@@ -145,24 +166,40 @@ function buildingHalo(state) {
 }
 
 /**
- * n contiguous tiles anchored at (q,r): the anchor plus its nearest legal
- * neighbours. `allow` narrows what counts as legal beyond the terrain itself —
- * it is how the gap between buildings is kept while the footprint grows, rather
- * than grown into and rejected afterwards.
+ * The ground a building's effect would reach, laid on this plot.
+ *
+ * The union of a ring around every tile of the footprint, not a circle around
+ * the anchor — which is what the rule actually says: `handsNeededFor` asks
+ * whether *any* tile of a yard is within `BUNKHOUSE_RADIUS` of *any* tile of a
+ * Bunkhouse. A three-tile Bunkhouse therefore covers a longer blob than a
+ * circle drawn on its middle, and a player shown the circle would be told a
+ * yard was out of reach that the rule takes in.
+ *
+ * Null for a building whose effect does not travel.
  */
-export function footprintAt(state, q, r, n, forTower, allow = null) {
-  const takes = (t) => !!t && isBuildable(state, t, forTower) && (!allow || allow(t));
-  const anchor = tileAt(state, q, r);
-  if (!takes(anchor)) return null;
-  const out = [{ q, r }];
-  if (n === 1) return out;
-  for (const h of spiral({ q, r }, 2)) {
-    if (out.length >= n) break;
-    if (h.q === q && h.r === r) continue;
-    if (!out.some((o) => distance(o, h) === 1)) continue; // stay contiguous
-    if (takes(tileAt(state, h.q, h.r))) out.push({ q: h.q, r: h.r });
-  }
-  return out.length === n ? out : null;
+export function coverageOf(state, type, tiles) {
+  const radius = C.buildingRadius(type);
+  if (!radius) return null;
+  const set = new Set();
+  for (const p of tiles) for (const h of spiral(p, radius)) set.add(key(h.q, h.r));
+  return set;
+}
+
+/**
+ * The yards that ground would take in — the reason to put it where you put it.
+ *
+ * Asked the same way `handsNeededFor` asks it, so what the outline promises is
+ * what the manning rule will do. A ruin is left out: it wants nobody until it
+ * is rebuilt, and counting it would flatter the plot.
+ */
+export function coveredBuildings(state, cover) {
+  if (!cover) return [];
+  return state.buildings.filter((b) => {
+    const def = C.buildingDef(b.type);
+    if (def && def.crew === 0) return false;      // a Palisade never wants anyone
+    if (b.ruined) return false;
+    return b.tiles.some((t) => cover.has(key(t.q, t.r)));
+  });
 }
 
 /** What a building of this type may stand on, gap rule included. */
@@ -216,19 +253,56 @@ function release(state, tiles) {
 
 // ---- towers ----------------------------------------------------------------
 
-export function canBuildTower(state, q, r, towerIndex) {
+/**
+ * Where a tower of this kind would stand if it stood here, tile by tile, each
+ * one flagged with whether the ground will take it.
+ *
+ * Its fixed shape, laid on the anchor — the same silhouette wherever the cursor
+ * goes, red where the plot will not do rather than quietly reshaped around the
+ * obstacle. Exactly a yard's rule, minus the gap: guns may stand shoulder to
+ * shoulder, and a battery of them along one lane is a thing worth building.
+ */
+export function towerPlan(state, q, r, towerIndex) {
+  const claimed = claimedTiles(state);
+  return C.towerTiles(towerIndex === undefined ? 0 : towerIndex, q, r).map((p) => {
+    const t = tileAt(state, p.q, p.r);
+    return {
+      q: p.q,
+      r: p.r,
+      ok: !!t && !t.occupant && !claimed.has(key(p.q, p.r)) && isBuildable(state, t, true),
+    };
+  });
+}
+
+/** The ground a tower of this kind would take here, or null if it will not fit. */
+export function towerFootprint(state, q, r, towerIndex) {
+  const plan = towerPlan(state, q, r, towerIndex);
+  return plan.some((p) => !p.ok) ? null : plan.map((p) => ({ q: p.q, r: p.r }));
+}
+
+export function canBuildTower(state, q, r, towerIndex, tier) {
   const t = tileAt(state, q, r);
   if (!t) return no('off the map');
   if (t.occupant) return no('occupied');
-  if (claimedTiles(state).has(key(q, r))) return no('a building is queued there');
+  if (claimedTiles(state).has(key(q, r))) return no('a structure is queued there');
   if (!isBuildable(state, t, true)) {
     if (t.terrain === 'sand' || t.terrain === 'salt') return no(`no footing on ${t.terrain}`);
     if (t.terrain === 'freshwater') return no('bridge it first');
     if (t.terrain === 'saltwater') return no('saltwater');
     return no('clear it first');
   }
-  for (const sp of state.spawners) {
-    if (sp.alive && distance(sp, { q, r }) <= C.EXCLUSION_RADIUS) return no(`within ${C.EXCLUSION_RADIUS} of a living spawner`);
+  // The rest of its yard. A tower's shape is settled the day it is raised and
+  // never grows again, so the whole of it has to be there before the order is
+  // taken rather than found later on.
+  const plan = towerPlan(state, q, r, towerIndex);
+  const short = plan.filter((p) => !p.ok);
+  if (short.length) {
+    return no(`its ${plan.length} tiles will not fit here — ${short.length} short`);
+  }
+  for (const p of plan) {
+    for (const sp of state.spawners) {
+      if (sp.alive && distance(sp, p) <= C.EXCLUSION_RADIUS) return no(`within ${C.EXCLUSION_RADIUS} of a living spawner`);
+    }
   }
   // A tower nobody can reach is a tower nobody can man, and a crag is by nature
   // ringed by ground the crew do not walk. The walk used to fall back to the
@@ -237,32 +311,43 @@ export function canBuildTower(state, q, r, towerIndex) {
   // Now the ground has to be opened first: some neighbour has to be somewhere
   // the crew can actually get to.
   const reach = walkableForWork(state);
-  if (!neighbours(q, r).some((n) => reach.has(key(n.q, n.r)))) {
+  const own = new Set(plan.map((p) => key(p.q, p.r)));
+  const reachable = plan.some((p) => neighbours(p.q, p.r)
+    .some((n) => !own.has(key(n.q, n.r)) && reach.has(key(n.q, n.r))));
+  if (!reachable) {
     return no('no way to walk to it — open the ground beside it first');
   }
   // The emplacement is wood and stone; the gun is a fitting out of the hold, of
-  // this tower's own kind and of any tier. Which tier it is decides what the
-  // tower is built at, and past tier 3 that is a bigger emplacement — so the
-  // ground beside it has to be there before the order is taken, not after.
+  // this tower's own kind. Which tier goes in decides what the tower is built
+  // at — but no longer how much ground it wants. `tier` names one; without it
+  // the cheapest of its kind is spent.
   if (C.TOWER_NEEDS_ITEM && towerIndex !== undefined) {
-    const tier = buildTier(state, towerIndex);
-    if (!tier) return no(`needs a ${C.itemName(towerIndex)} in the hold`);
-    const need = C.footprintFor(tier, false);
-    if (need > 1 && !growFootprint(state, { q, r, footprint: [{ q, r }] }, need)) {
-      return no(`a tier-${tier} ${C.itemName(towerIndex)} needs more cleared ground beside it`);
+    if (tier === undefined) {
+      if (!buildTier(state, towerIndex)) return no(`needs a ${C.itemName(towerIndex)} in the hold`);
+    } else if (!countOf(state, towerIndex, tier)) {
+      return no(`no tier-${tier} ${C.itemName(towerIndex)} in the hold`);
     }
   }
   return ok;
 }
 
-export function buildTower(state, q, r, towerIndex) {
+/**
+ * Raise a tower here, spending one fitting of its kind out of the hold.
+ *
+ * `want` names the tier to spend. Left out, the cheapest held is taken — which
+ * is the right default and was for a long time the only behaviour: a standing
+ * tower rises by having a better fitting put in, so spending the good one on
+ * the emplacement never bought a tier the cheap one could not reach. It is a
+ * default and not a rule, though. Holding a tier-4 and nothing else pressing to
+ * spend it on, a player may want the gun firing at tier 4 today rather than
+ * raising it at 1 and fitting it again next turn.
+ */
+export function buildTower(state, q, r, towerIndex, want) {
   const def = C.TOWERS[towerIndex];
-  const tier = C.TOWER_NEEDS_ITEM ? buildTier(state, towerIndex) || 1 : 1;
+  const held = want !== undefined && countOf(state, towerIndex, want) ? want : buildTier(state, towerIndex);
+  const tier = C.TOWER_NEEDS_ITEM ? held || 1 : 1;
   if (C.TOWER_NEEDS_ITEM) takeItem(state, towerIndex, tier);
-  const need = C.footprintFor(tier, false);
-  const footprint = need > 1
-    ? growFootprint(state, { q, r, footprint: [{ q, r }] }, need) || [{ q, r }]
-    : [{ q, r }];
+  const footprint = towerFootprint(state, q, r, towerIndex) || [{ q, r }];
   const tower = {
     id: nextId(state, 'tw'),
     q, r, towerIndex, tier, evolved: false,
@@ -281,36 +366,14 @@ export function canFitItem(state, tower, tier) {
   if (tier <= tower.tier && tower.itemTier > 0) return no('not a higher tier');
   if (tier < 1 || tier > C.MAX_TIER) return no('no such tier');
   if (!countOf(state, tower.towerIndex, tier)) return no(`no tier-${tier} ${C.itemName(tower.towerIndex)} in the hold`);
-  const need = C.footprintFor(tier, false);
-  if (need > tower.footprint.length) {
-    const grown = growFootprint(state, tower, need);
-    if (!grown) return no('needs more cleared ground beside it');
-  }
   return ok;
-}
-
-function growFootprint(state, tower, need) {
-  const out = tower.footprint.map((p) => ({ q: p.q, r: p.r }));
-  for (const h of spiral({ q: tower.q, r: tower.r }, 2)) {
-    if (out.length >= need) break;
-    if (out.some((o) => o.q === h.q && o.r === h.r)) continue;
-    if (!out.some((o) => distance(o, h) === 1)) continue;
-    const t = tileAt(state, h.q, h.r);
-    if (t && isBuildable(state, t, true)) out.push({ q: h.q, r: h.r });
-  }
-  return out.length === need ? out : null;
 }
 
 export function fitItem(state, tower, tier) {
   takeItem(state, tower.towerIndex, tier);
   const displaced = tower.itemTier;
-  const need = C.footprintFor(tier, false);
-  if (need > tower.footprint.length) {
-    const grown = growFootprint(state, tower, need);
-    release(state, tower.footprint);
-    tower.footprint = grown;
-    occupy(state, tower.footprint, { kind: 'tower', id: tower.id });
-  }
+  // The emplacement does not change: a better gun goes into the yard that is
+  // already there. Only the manning it wants moves with the tier.
   tower.tier = tier;
   tower.itemTier = tier;
   if (displaced > 0) state.base.hold.push({ tower: tower.towerIndex, tier: displaced });
@@ -343,20 +406,16 @@ export function canEvolve(state, tower, partner) {
   if (tower.evolved || partner.evolved) return no('already evolved');
   if (tower.tier < C.MAX_TIER || partner.tier < C.MAX_TIER) return no('both must be tier 5');
   if (!evolutionPartners(tower.towerIndex).includes(partner.towerIndex)) return no('not a legal recipe');
-  const need = C.footprintFor(C.MAX_TIER, true);
-  if (!growFootprint(state, tower, need)) return no('needs 3 cleared tiles');
   return ok;
 }
 
 export function evolveTower(state, tower, partner) {
-  const need = C.footprintFor(C.MAX_TIER, true);
-  const grown = growFootprint(state, tower, need);
+  // The partner's ground goes back to the island; the survivor keeps its own
+  // shape, which is the shape it was raised on. An evolution is two guns made
+  // into one, not a yard extension.
   release(state, partner.footprint);
   state.towers.splice(state.towers.indexOf(partner), 1);
   state.crew.assignments = state.crew.assignments.filter((a) => !(a.kind === 'man' && a.target === partner.id));
-  release(state, tower.footprint);
-  tower.footprint = grown;
-  occupy(state, tower.footprint, { kind: 'tower', id: tower.id });
   tower.evolved = true;
   tower.essence = [...tower.essence, C.TOWERS[partner.towerIndex].essence];
   return tower;
@@ -386,9 +445,14 @@ export function canBuildBuilding(state, type, q, r) {
   }
   const foot = plan.map((p) => ({ q: p.q, r: p.r }));
   if (isEconomic(def)) {
-    const net = roadNetwork(state);
-    const onRoad = foot.some((p) => neighbours(p.q, p.r).some((n) => net.has(key(n.q, n.r))));
-    if (!onRoad) return no('needs road beside it, joined to the ship');
+    // What a working building needs beside it is a way for the goods to leave,
+    // and that is any open ground joined to the ship — the road you cut, the
+    // bridges, or the sand and meadow that were already open. A natural run of
+    // open ground is a supply line the island handed you rather than one you
+    // paid for; it is also a lane the cohorts march straight up.
+    const net = shipNetwork(state);
+    const joined = foot.some((p) => neighbours(p.q, p.r).some((n) => net.has(key(n.q, n.r))));
+    if (!joined) return no('needs open ground beside it, joined to the ship');
   }
   if (type === 'excavation') {
     const onCache = foot.some((p) => {
@@ -496,19 +560,10 @@ export function buildBridge(state, q, r) {
  * ground will take a building, red where it will not.
  */
 export function footprintPreview(state, q, r, n, forTower = false, type = null) {
-  // a building draws its own fixed shape, whether or not the plot will take it
-  if (type) return buildingPlan(state, type, q, r) || [];
-  const takes = (t) => !!t && isBuildable(state, t, forTower);
-  const real = footprintAt(state, q, r, n, forTower);
-  if (real) return real.map((p) => ({ ...p, ok: true }));
-  const out = [{ q, r }];
-  for (const h of spiral({ q, r }, 2)) {
-    if (out.length >= n) break;
-    if (h.q === q && h.r === r) continue;
-    if (!out.some((o) => distance(o, h) === 1)) continue;
-    out.push({ q: h.q, r: h.r });
-  }
-  return out.map((p) => ({ ...p, ok: takes(tileAt(state, p.q, p.r)) }));
+  // Both draw their own fixed shape, whether or not the plot will take it — a
+  // tower reads `n` as its tower index, a building as its tile count.
+  if (forTower) return towerPlan(state, q, r, n);
+  return buildingPlan(state, type, q, r) || [];
 }
 
 export function addItem(state, tower, tier = 1) {

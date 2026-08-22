@@ -64,9 +64,12 @@ html, body {
 #hud .census .wide { grid-column: 1 / -1; padding-top: 4px; }
 #hud .census b { color: var(--text); font-weight: normal; }
 #hud .sw { margin-right: 3px; }
-/* Last thing on the bar, sized off it rather than off the action row: the bar is
-   one line tall and a full-size button would set the height of the whole thing. */
-#newrun { flex: none; margin-left: 16px; padding: 1px 8px; line-height: 1.4; }
+/* Last things on the bar, sized off it rather than off the action row: the bar is
+   one line tall and a full-size button would set the height of the whole thing.
+   They sit as a pair, so only the first of them takes the gap from the census. */
+#restartmap, #newrun { flex: none; padding: 1px 8px; line-height: 1.4; }
+#restartmap { margin-left: 16px; }
+#newrun { margin-left: 6px; }
 
 #middle { display: flex; flex: 1 1 auto; min-height: 0; position: relative; }
 #map { flex: 1 1 auto; min-width: 0; display: block; cursor: crosshair; }
@@ -93,7 +96,6 @@ html, body {
 }
 #reel-panel .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
 #reel-panel .row .k { color: var(--dim); }
-#reel-panel .row .gap { flex: 1; }
 #reel-panel button { padding: 1px 8px; line-height: 1.4; }
 #reel-panel button.on { background: #2f3742; color: #fff; }
 #reel-panel .beat { color: var(--dim); }

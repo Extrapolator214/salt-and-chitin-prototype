@@ -307,11 +307,35 @@ function attempt(seed, attemptNo) {
     if (angleDiff(bearing(base, t), seaward) > C.LANDING_BEACH_ARC) continue;
     makeBeach(t);
   }
-  // The ship has to be able to start a road. Sand and cliff never can be one,
-  // so a landing walled in by its own beach is a dead run — reroll instead.
-  const exits = new Set();
+  // ---- 3.1d The apron -----------------------------------------------------
+  // A tile of sand all the way round the ship's standing, landward face and
+  // all. What it buys is that nothing is ever jammed against the hull: no
+  // cliff, no standing wood, no stream, and no cove wall closing on the ramp.
+  // A hand walks off the ship in any direction and has ground under them.
+  //
+  // Sand can never be cut, so an apron would once have sealed the ship off
+  // from every road it was ever going to cut. It no longer does: the network is
+  // open ground rather than road (see `shipNetwork`), so the apron joins the
+  // hull to the first road cut at its edge. The sea is left where it is — the
+  // ship is beached, and its back is to the water.
+  const inFoot = new Set(foot.map((t) => key(t.q, t.r)));
+  const apron = [];
   for (const f of foot) {
-    for (const n of neighbours(f.q, f.r)) {
+    for (const h of spiral(f, C.LANDING_APRON)) {
+      const t = get(tiles, h.q, h.r);
+      if (!t || inFoot.has(key(t.q, t.r)) || t.terrain === 'saltwater') continue;
+      if (apron.includes(t)) continue;
+      makeBeach(t);
+      apron.push(t);
+    }
+  }
+
+  // The ship has to be able to start a road, and now it starts one at the
+  // apron's edge rather than against the hull. A landing whose apron opens onto
+  // nothing but more sand, cliff and water is a dead run — reroll instead.
+  const exits = new Set();
+  for (const a of apron) {
+    for (const n of neighbours(a.q, a.r)) {
       const t = get(tiles, n.q, n.r);
       if (isFree(t)) exits.add(key(t.q, t.r));
     }
@@ -636,24 +660,26 @@ function attempt(seed, attemptNo) {
   }
 
   // ---- the ship's road exits ----------------------------------------------
-  // The fill can drop sand, salt or meadow against the ship's side, and none of
-  // the three can ever be cut, so a landing can end up with no ground to start
-  // a road on.
-  // Whatever is left there is turned back into scrub — thin ground, three turns
-  // of work like any other, but ground a road can begin on.
+  // The apron's edge is where the first road is cut, so there has to be ground
+  // out there worth cutting. The fill can drop sand, salt or meadow all round
+  // it, and none of the three can ever be cut, so a landing can end up open on
+  // every side and with nowhere to start a road.
+  // Whatever is left there is turned back into scrub — thin ground, one turn of
+  // work, but ground a road can begin on.
   {
     const faces = [];
-    for (const f of foot) {
-      for (const n of neighbours(f.q, f.r)) {
+    for (const a of apron) {
+      for (const n of neighbours(a.q, a.r)) {
         const t = get(tiles, n.q, n.r);
-        if (!t || t.occupant || t.terrain === 'saltwater' || faces.includes(t)) continue;
+        if (!t || t.occupant || t.terrain === 'saltwater') continue;
+        if (t.beach || t.works || faces.includes(t)) continue;
         faces.push(t);
       }
     }
     const clearable = () => faces.filter((t) => C.TERRAIN[t.terrain].clearable).length;
     for (const t of faces) {
       if (clearable() >= C.LANDING_EXITS_MIN) break;
-      if (C.TERRAIN[t.terrain].clearable || t.beach) continue;
+      if (C.TERRAIN[t.terrain].clearable) continue;
       setTerrain(t, 'scrub', { fixed: false });
     }
     if (clearable() < C.LANDING_EXITS_MIN) return null;
@@ -682,9 +708,10 @@ function attempt(seed, attemptNo) {
   };
 
   // Treasure is layered. A tile is three turns of cutting, so a chest eighteen
-  // tiles inland is most of an act away — and gold is the only thing that buys
-  // a gun. `CACHE_NEAR` guarantees the first few are within reach of the
-  // landing; the rest are scattered across the island as before.
+  // tiles inland is most of an act away — and gold buys a gun outright, where
+  // iron wants a Forge and a Workshop standing first. `CACHE_NEAR` guarantees
+  // the first few are within reach of the landing; the rest are scattered
+  // across the island as before.
   const [lo, hi] = C.CACHE_DIST;
   const [nearLo, nearHi] = C.CACHE_NEAR;
   let caches = 0;

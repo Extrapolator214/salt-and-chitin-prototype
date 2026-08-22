@@ -43,12 +43,41 @@ python3 -m http.server 8000
 
 Then open `http://localhost:8000/`.
 
+## The run keeps itself
+
+The run lives in the browser's `localStorage` — nothing is written to disk — and
+a reload comes back to where you left off, queue included. Two keys, because the
+two halves change at wildly different rates: `salt-n-chitin/map` is 850 KB of
+tiles and is rewritten only when `map.version` says the labour moved the ground,
+`salt-n-chitin/run` is 3 KB of everything else and is rewritten whenever anything
+moves. Only a player-phase state is written, so a reload during a resolve comes
+back to the top of that turn and plays it again — the same result, since the RNG
+is part of the state.
+
+With nothing stored and no `?seed=`, **the seed is today's date** — 20260821 on
+the 21st of August 2026 — so a fresh visit is a fresh island and two people on
+the same day get the same one. `?seed=` still names an island, but reloading a
+seeded URL resumes rather than restarting, and starting a new run from one
+rewrites the seed in the address bar so the two never disagree.
+
+One thing had to be kept out of the save: **`state.derived`**, the map's cached
+road network and walkable ground. They are `Set`s keyed on `map.version`, and
+`JSON.stringify` turns a Set into `{}` — the version still matched after a
+reload, so the cache handed back an empty object where a Set was expected and
+the first order that asked "can anyone walk there" brought the turn down. The
+acceptance suite now walks a played state and refuses to find a Set or a Map
+anywhere except the tiles, and checks that a decoded run can answer for its
+ground *before* it plays a turn, which is the only window in which a stale cache
+is visible at all.
+
 ## Controls
 
 | input | effect |
 |---|---|
 | hover | the tile panel |
-| left-click | the tile's own modal — points of interest first, then build-tower on open buildable ground |
+| left-click | the tile's own modal — points of interest first, then what can be cut there |
+| Restart map | the same island again from turn 1; **New run** is a different island |
+| Towers / Economy in the bar | pick a gun or a yard; its outline then follows the cursor and a click puts it down |
 | shift-click | put the nearest idle hand on the tile: cut it, or work what the cutting uncovered |
 | right-click | the same as shift-click |
 | drag | pan |
@@ -241,7 +270,9 @@ either takes the whole shape or the placement is refused — `its 6 tiles will n
 fit here — 3 short` — and the outline keeps its shape and turns red rather than
 quietly reshaping around the obstacle. `buildingPlan()` returns that shape with a
 per-tile verdict, and it is the single thing the preview, the check and the build
-all read, so what goes down is always what was shown.
+all read, so what goes down is always what was shown. `footprintAt` — the
+greedy grower — is gone; `footprintPreview` is now a two-line dispatch onto
+`buildingPlan` or `towerPlan`.
 
 | tiles | shape |
 |---:|---|
@@ -257,8 +288,100 @@ now cut the shape's own tiles (`clearPad` in `tests/play.mjs`, `padFor` in
 `tests/acceptance.mjs`). That turned out to be *more* efficient than the greedy
 growth it replaced — the reference policy went from 2 wins in 6 seeds back to
 **3**, because clearing exactly the six tiles a Sappers' Camp needs beats hoping
-six of the right ones fall out of a road gang. Tower footprints still grow with
-tier; they are one to three tiles and have no silhouette worth fixing.
+six of the right ones fall out of a road gang. Towers take the same table: each
+gun's yard is one to three tiles, laid as a fixed shape on the tile the player
+placed it on.
+
+### A gun's yard belongs to the gun, not to the tier
+
+Footprint used to be a function of tier: one tile to tier 3, two at tier 4, three
+once evolved, grown greedily out of whatever neighbours happened to be free. Two
+things were wrong with it. The first is that it made a fitting refusable for a
+reason the player could not see coming — buy a tier-4 Culverin, walk it to a gun
+that has had a yard built up against it since, and the fit is refused for ground.
+The second is that a silhouette that changes under you cannot be placed: there
+was nothing to draw on the map before the click.
+
+So `tiles` moved onto the tower definition, 1 to 3, out of `BUILDING_SHAPES` like
+everything else. The whole shape must be free, cleared and buildable when the
+order is taken; after that it never changes, and tiering only moves power and
+manning. An evolution consumes the partner's ground and the survivor keeps its
+own.
+
+The shapes are small on purpose. A gun is a thing you put on a corner of a lane,
+and a battery of them should read as a line of guns rather than as a compound —
+so no tower needs the gap rule that keeps yards apart, and two may stand
+shoulder to shoulder.
+
+### A Bunkhouse is placed for its reach, so the reach is on the cursor
+
+A Bunkhouse takes a hand off every yard within `BUNKHOUSE_RADIUS`, which makes
+*where* it goes the whole decision — and nothing on screen said where that was
+until it was already standing. The placement outline now carries the reach.
+
+Not a circle on the anchor: `handsNeededFor` asks whether **any** tile of a yard
+is within the radius of **any** tile of the Bunkhouse, so a three-tile Bunkhouse
+covers a longer blob than a ring drawn on its middle — 48 hexes against 37, and
+a circle would have called yards out of reach that the rule takes in.
+`coverageOf` builds the real union and the map shades it; `coveredBuildings`
+rings the yards inside it and the label counts them, because "covers 2 yards" is
+the thing actually being decided. The acceptance suite walks every legal anchor
+around a Forge and checks the outline's promise against what standing a real
+Bunkhouse there does to that Forge's crew.
+
+### Which fitting to spend is the player's call
+
+A tower is built at the tier of the fitting it takes, and the **lowest** held was
+always the one spent — deliberately, because a standing tower rises by having a
+better fitting put in, so the tier-1 route reaches the same place for less and
+taking the cheapest never costs a tier that could have been had.
+
+That is a good default and it was a bad rule. A tier-4 gun held with nothing
+pressing to fit it to is worth more in the ground today than raised at tier 1 and
+fitted again next turn, and there was no way to ask for that: the high fitting
+was not spendable at all. The Towers panel now shows **a Build button per tier
+held**, and the tier rides along with the placement — on the order, on the label
+under the cursor, and through the queue's projection, where two towers named at
+one tier want two fittings of it. Naming no tier still spends the cheapest.
+
+### The guns are picked off the bar, and placed like a yard
+
+Left-clicking open buildable ground used to open the whole gunnery catalogue.
+That put the eight towers behind whatever hex was under the pointer: unreachable
+until something had been cleared, and then unavoidable on every cleared tile
+whether or not a gun was wanted. **Towers** now sits in the bar beside
+**Economy** and works the same way — pick the gun, carry its silhouette over the
+map, click. The outline shows the yard green or red per tile and draws the arc
+it would cover, cliff bonus included, which is the question actually being
+asked. A click on a tile is about that tile again.
+
+The catalogue has no tile to offer, so its rows grey out for price and hold only:
+`canOrderAnywhere` is `canEnqueue` minus the site check.
+
+### Rounds, not lines
+
+A tower's power is a rate spent every tick, and drawing it was a one-pixel line
+from gun to target for two frames — eight towers pointing at the swarm, with
+nothing in the air. Each gun now throws a **round** on its own cadence
+(`SHOT_INTERVAL` by the tower's `rate`) at the spot its target stood on when the
+trigger went, flying at `PROJECTILE_SPEED` and leaving a ring flash where it
+lands, wider for a blast gun. The rounds carry no damage — the arithmetic is
+untouched — and they lead nothing and chase nothing, so a target that dies
+mid-flight still gets its round.
+
+Every living unit also carries a **health bar** at hex size 8 and up, with a
+shield-bearer's plate as its own band above it. A cohort that thins out tells you
+the tally afterwards; a rank of bars draining tells you which end of the road is
+doing the killing while it is still happening.
+
+**What the fixed yard cost the harness.** Over seeds 20260816–20260821 the
+reference policy went from **4 of 6** to **1 of 6** the moment a gun needed its
+whole shape open: `towerKind` is the Culverin Battery, two tiles, and beside a
+one-tile road there is no second tile. Teaching it to ask per kind and to cut a
+gun's yard the way it already cuts a building's (`gunShape`, `clearGunPad`) puts
+it back to **2 of 6**. The rest of the gap is the rule biting, not a bug — the
+policy still favours the wide kinds, and re-picking `towerKind` for the new shape
+rule is tuning nobody has done yet.
 
 ### Manning is counted, and the crew upgrade is one hand
 
@@ -283,6 +406,85 @@ testing:
   is the binding constraint on how fast the gun line climbs. Pricing it lower
   does not buy the seed back — at 30 gold it is still 2 — because what is short
   is the hand, not the gold.
+
+### Standing a worker down is not an order
+
+The queue exists to hold back what changes the world, so that any of it can be
+taken back before the turn ends. Taking a worker off a job changes nothing out
+there: it moves nobody — they go on standing exactly where the job left them —
+it costs nothing, and there is no state of the world in which it can fail. So it
+is done on the spot, like a trade over the dock's counter, and for the same
+reason. `O.standDown(state, assignmentId)`, not an entry in `ORDERS`.
+
+Queued, it was three separate pieces of make-believe: `handFreed` crediting a
+hand back to `projectedHands`, a case in `projectedAssignments` that dropped the
+row again, and a branch in `projectedCrew` that un-took the body. Each described
+a release that had not happened yet, and each was somewhere the panels could
+disagree with the resolve about who was free — the first two had already been
+bugs once (below). Doing it now deletes all three, and the answer they were
+approximating is simply the truth: the body is loose, put them somewhere else
+this phase.
+
+One consequence is worth naming, because it looks at first like a loss. Stand
+the last hand out of the Workshop and the Workshop stops being manned *now*, so
+a craft order queued after it is refused on the spot rather than accepted and
+then dropped by the resolve — which is what used to happen, since `applyQueue`
+re-checks every order in the order it was given and the release came first. The
+panel and the resolve now say the same thing at the same time, which is the
+whole point of doing it at once.
+
+**A house is manned from whichever of its tiles you are standing on.** Which
+matters here, because the release has to be its own undo — a hand stood down off
+a five-tile Workshop is still standing on the Workshop, and manning it again
+must not be a walk. `jobPlace` took the structure's anchor tile, which is a
+record-keeping detail rather than a doorway, so a body on the far corner was
+quoted a walk across ground he was already on. Given the body who is doing the
+job, it now answers with the footprint tile he is on, and `assign` asks it again
+once it knows which body took the order. He stays where he is, no line is drawn
+across the yard to himself, and the crew panel calls him working.
+
+### The bar and the crew panel count the same company
+
+The bar said **1 spare** while the crew panel listed **5 free** — and four of the
+five were named against orders in the queue beside it.
+
+An order that asks for "a hand" carries the literal string `hand` as its `who`:
+which hand is not decided until the queue runs and each order takes the nearest
+body still free. `projectedAssignments` passes that string through, so the
+panel's busy set matched no member and every hand the queue was about to take
+was also listed as standing about. The bar was right — it works the count out by
+subtracting each order's appetite from the idle hands — and it was the only one
+of the two that was.
+
+`projectedCrew` already resolves each order to the body that will take it, in
+the same order and by the same rule as the resolve; that is how the queue panel
+has been naming rows all along. `projectedRoster` folds that answer back into
+the roster, and the crew panel and the idle-turn warning now both read it — so
+the table and the count come off one list and cannot disagree. A queued row
+names its hand, and that hand is not also standing about.
+
+Measured over three seeds and ninety turns: the old computation disagreed with
+the bar on **110 of 120** checks, so this was the normal case rather than an
+edge one. The acceptance suite now asserts the two agree on every turn of a run.
+
+### A queued plot can be taken back from the ground it is standing on
+
+Two halves of the same oversight, both about the gap between placing a structure
+and the turn that raises it.
+
+- **Clicking a queued plot said "road".** Nothing occupies the tiles until the
+  queue runs, so the tile panel found bare ground and offered nothing — with the
+  yard outlined on that very hex and its order in the panel beside it. Taking it
+  back is the only thing anyone wants from a plot they have changed their mind
+  about, and with the catalogue moved to the bar a click on the tile was the one
+  gesture still pointing at the thing they placed. `queuedStructuresAt` answers
+  which order claimed a hex — from **any** tile of the footprint, not just the
+  anchor — and the panel leads with it and a Cancel button.
+- **The Economy list did not read the queue.** `canBuildBuilding` refused a
+  second Forge with "already in the queue" while the list showed a lit Build
+  button and a state of `—`. It now counts what is queued alongside what is
+  built (`queuedBuildingsOfType`), so a queued yard reads `queued at (-18, 29)`
+  and the row greys out with the reason the outline was already giving.
 
 Each building also has **a panel of its own** now (click its tile): what it owns,
 its condition, its crew standing and on the way, the upgrade, and the rebuild
@@ -470,7 +672,8 @@ What the design *does* say, and this build now follows:
 
 - **Only tier-1 items have a price** — "everything above is merged, which keeps
   the shop one line instead of five". 8 gold or 6 iron, a quarter off with the
-  Weapons Master.
+  Weapons Master. Which of the two a fitting costs is not a choice; see *A
+  fitting has one house* below.
 - **Two of a kind at the same tier merge into one of the next**, to a ceiling of
   tier 5 (16 tier-1 fittings).
 - **A tower needs an item to be built** — the emplacement is 30 wood + 20 stone,
@@ -488,6 +691,80 @@ nothing that matters, because sixteen tier-1 fittings of *one* kind are what
 make a tier-5. When the change first landed the AI player dropped to 0/6 with
 every tower stuck at tier 2; making it build a single tower type took it to
 7/12. Specialising the gun line is now load-bearing.
+
+### A fitting has one house, and the dock has a counter
+
+`04-economy.md` §4 sells and crafts every item over the same two prices — "8
+gold at the ship or a Trading Dock, 6 iron at a Workshop" — which made the two
+routes interchangeable and made both available on the beach, before anything at
+all was built. This build splits them, and shuts both until a house is standing.
+
+**Each fitting names its `source`, and there is exactly one route to it.**
+
+| crafted at a Workshop, 6 iron | bought off a Peculiar Merchant, 8 gold |
+|---|---|
+| Swivel Gun · Culverin · Chain-Shot | Powder Charge · Parrot Cage · Alligator Egg · Krakenling Spawn · Monkey Troop |
+
+The line is what the thing *is*. A barrel, a bore and a length of chain are
+ironwork, and a crew with a forge and a workshop makes ironwork. Powder,
+parrots, alligator eggs, krakenling spawn and a troop of monkeys are not made by
+anybody on this ship at any price — they are bought, off somebody peculiar
+enough to be selling them on this island. So a Culverin cannot be bought and a
+Parrot Cage cannot be crafted, and half the gun catalogue is shut until its
+house stands and is manned.
+
+**The Peculiar Merchant** is the new building that opens the other half: 3
+tiles, 90 wood + 60 stone, and the only yard on the shelf that runs on **one
+hand** rather than two (`crew` in `C.BUILDINGS`, which `handsNeededFor` now
+reads for any building that names one). It is deliberately the cheapest real
+yard on the list. It gates five of the eight guns, and a gate that costs a fifth
+of the company to open is a gate nobody opens in time.
+
+**The Trading Dock gained a counter.** Its standing trade is unchanged — 12 of
+the larger of wood and stone into 1 gold, every turn, asking nobody — and beside
+it there is now a shop: wood, stone and iron bought and sold to order, in
+whatever amount. It is one of the two things the player can do that are **not
+orders** (standing a worker down is the other). Goods over a counter are handed
+across and paid for on the spot; there is nothing in a trade for a resolve to
+carry out, so it costs no turn, takes no body, and never enters the queue.
+Because it moves the stores it is the only panel in the game with a **confirm
+step**: everything else sits in the queue with an x beside
+it until the turn ends, and this moves the stores the instant it is pressed, so
+it says what it is about to do in gold and in goods and waits.
+
+| good | the dock pays | the dock asks |
+|---|---|---|
+| wood | 1 gold / 12 | 2 gold / 12 |
+| stone | 1 gold / 12 | 2 gold / 12 |
+| iron | 1 gold / 1 | 2 gold / 1 |
+
+Whole gold both ways and rounded against the player — `floor` on a sale, `ceil`
+on a purchase — so a handful of wood is refused rather than taken for nothing.
+The sell side is `DOCK_INPUT` for `DOCK_GOLD_OUT` exactly, so the counter never
+beats the dock's own trade; selling by hand is a matter of timing, not of rate.
+What is on the counter is `projectedRes`, not `state.res`: the stores in the bar
+are already spent down by everything queued against them, and wood a queued
+Workshop is counting on cannot be sold out from under it.
+
+**What it cost.** The change is a real gate, and `tests/play.mjs` measures it.
+Over the same six seeds the honest player went **2/6 → 1/6**. The route it
+takes changed too, and the counter is what saved it:
+
+| policy | wins |
+|---|---|
+| before the split — gold buys any fitting, no house | 2/6 |
+| the gold shelf (Dynamite + Parrots), Merchant built | 0/6 |
+| the same, with the Merchant at 90w 60s and one hand | 0/6 |
+| the Culverin line, Workshop built, iron bought over the counter | **1/6** |
+
+The gold shelf loses on range: what kills a run is a lane the guns cannot reach
+across, and the Culverin's arc of 4 is the widest on the shelf. But a Culverin
+is six iron, and one Forge makes one iron a turn — so on its own the iron line
+raises a gun every six turns and is not a line at all. The counter is what makes
+it: gold out of the chests, over the counter, back as iron at 2 gold apiece.
+That is the shape the split was worth having — the two halves of the economy
+now have to be plumbed into each other, rather than gold buying anything on its
+own from turn one.
 
 ### The canopy shadows what it stands over
 
@@ -751,21 +1028,24 @@ Two small departures from the spec's uniformity.
 stone** and gives them all the same small footprint. This build charges each for
 what it does — the Sappers' Camp is the only route to a win at 380+260, a
 Bunkhouse is an enabler nobody should ration at 50+40 — and makes each one a
-yard rather than a hut. The ten sum to **1400 wood and 940 stone** against the
-flat price's 1200 and 800, which moves 06-acceptance.md §3.3's build-out bill
-from 4825 to **5465** — inside the harness's ±15% band rather than identical to
-it. The harness sums the ten rather than multiplying one price, so re-balancing
-them will not silently move the bill.
+yard rather than a hut. With the Peculiar Merchant (below) the shelf is eleven,
+and they sum to **1490 wood and 1000 stone** against the flat price's 1320 and
+880, which puts 06-acceptance.md §3.3's build-out bill at **5655** against the
+5025 the spec's own flat price would give for eleven — inside the harness's ±15%
+band rather than identical to it. The harness sums the shelf rather than
+multiplying one price, and restates the spec's anchor from the shelf's length,
+so adding a building moves neither silently.
 
 | building | tiles | cost | | building | tiles | cost |
 |---|---:|---|---|---|---:|---|
 | Sappers' Camp | 6 | 380w 260s | | Forge | 4 | 110w 70s |
 | Warehouse | 5 | 150w 100s | | Powder Store | 3 | 100w 70s |
 | Workshop | 5 | 150w 100s | | Excavation Camp | 4 | 100w 60s |
-| Trading Dock | 5 | 140w 90s | | Hospital | 3 | 90w 60s |
-| Tinker's Shed | 4 | 130w 90s | | Bunkhouse | 3 | 50w 40s |
+| Trading Dock | 5 | 140w 90s | | Peculiar Merchant | 3 | 90w 60s |
+| Tinker's Shed | 4 | 130w 90s | | Hospital | 3 | 90w 60s |
+| | | | | Bunkhouse | 3 | 50w 40s |
 
-(The Palisade is an eleventh building and not one of the ten: 1 tile, 140w 90s,
+(The Palisade is a twelfth building and not one of the eleven: 1 tile, 140w 90s,
 and no part of the economy.)
 
 **Every resolve now ends with a modal**, not only the eventful ones. A quiet
@@ -773,6 +1053,17 @@ turn says so — "a quiet turn — nothing came of it" — and then reports what
 under way: how many are at work, how many are walking, how many are standing
 about, and how many masses are on the move. A turn where nothing happens is
 still information, and it used to pass in silence.
+
+Unless the player has asked not to be shown any of it. **`skip` is the third of
+the resolve reel's speed settings**, beside 1x and 3x, and is set the same way:
+chosen, a turn resolves with no panes, no walk and no report, and the next
+player phase begins at once. It used to be a fourth kind of control, one that
+could only be pressed while a reel was already running — which is to say it was
+greyed out at every moment a player might decide they had seen enough of these.
+The decision is about resolves in general, so it belongs among the settings. The
+end of the run is the one modal it does not suppress: there is no next phase to
+get on with, and how it went is the only thing left to say. `Esc` still abandons
+the reel in front of you without touching the setting.
 
 ### A point of interest is a job of its own
 
@@ -1089,7 +1380,9 @@ touched. They are recorded because the *class* of each is likely to recur.
   — the order was consumed with no refusal and no log line, and the tile simply
   never got worked. Both fixed by asking whether the body is a hand
   (`handFreed`), and by routing every assignment through `place()`, which says
-  so out loud when there is nobody to send.
+  so out loud when there is nobody to send. Both of those are moot now: standing
+  down is instant and is no longer an order at all, so there is nothing to
+  project and nothing to credit (above). `place()` stays.
 - **One cache kept the shape the others had already abandoned.** `canopyShadow`
   held a module-level `{seed, version}` cache — exactly what the note above
   `cacheFor` says is wrong, and for exactly the stated reason: two states of the

@@ -16,7 +16,7 @@ import * as A from '../sim/assault.js';
 import { evolutionPartners } from '../sim/build.js';
 import { clearCapacity, nearestIdle, pickNearest, crewRoute, jobPlace } from '../sim/labour.js';
 import { outcomeText } from '../sim/turn.js';
-import { roadReaches } from '../sim/enemy.js';
+import { networkReaches } from '../sim/enemy.js';
 import * as art from './ascii.js';
 
 let current = null;
@@ -103,22 +103,45 @@ const btn = (label, action, arg, disabled) =>
 // ---- views -----------------------------------------------------------------
 
 const VIEWS = {
-  buildTower(state, { q, r }) {
-    const site = B.canBuildTower(state, q, r);
+  /**
+   * The gunnery shelf, off the bar.
+   *
+   * It used to hang off a click on open ground, which made the catalogue a
+   * property of whatever hex happened to be under the pointer: the whole list
+   * was unreachable until something had been cleared, and once it was, every
+   * cleared tile opened it whether the player wanted a gun or not. Picking the
+   * gun first and the ground second is the way a yard has always been placed,
+   * and the outline that follows the cursor answers "will it fit" far better
+   * than a table of refusals for one tile ever did.
+   */
+  towers(state) {
     const proj = O.projectedItems(state);
-    let h = `<h2>Build a tower at (${q}, ${r})</h2>`;
-    if (!site.ok) h += `<p class="why">${esc(site.why)}</p>`;
+    const standing = state.towers.length;
+    let h = '<h2>Towers</h2>';
     h += `<p class="note">${costText(C.TOWER_COST)} for the emplacement` +
       (C.TOWER_NEEDS_ITEM ? ', and a fitting out of the hold for the gun' : '') +
-      '. A tower is built at the tier of the fitting it takes, and rises from there '
+      '. Pick one and place it on the map — the outline shows its yard and its arc, ' +
+      'green where the ground will take it.</p>';
+    h += '<p class="note">A fitting has one house that supplies it and no other: the ironwork — '
+      + esc(C.TOWERS.filter((d) => C.itemSource(d.i) === 'iron').map((d) => C.itemName(d.i)).join(', '))
+      + ' — is crafted at a <b>Workshop</b> out of iron, and the rest are bought for gold off a '
+      + '<b>Peculiar Merchant</b>. Until one of those stands and is manned, no gun of that shelf can be raised.</p>';
+    h += '<p class="note">A tower is built at the tier of the fitting it takes, and rises from there '
       + 'by having a higher-tier fitting of its own kind put in place. The lowest you hold '
-      + 'is the one spent, so a better gun is never used up on the emplacement.</p>';
-    h += '<table><tr><th>tower</th><th>range</th><th>fire</th><th>fitting</th><th>held</th><th>builds at</th><th>cost</th><th></th><th></th></tr>';
+      + 'is usually the one to spend, since a better gun is then never used up on the '
+      + 'emplacement — but every tier you hold has a button, so a tier-4 fitting can go '
+      + 'straight into the ground rather than waiting a turn to be fitted. '
+      + 'Its <b>yard does not change</b>: the ground a gun stands on is settled the day it goes up.</p>';
+    h += `<p class="note">A gun needs cleared ground, a way for the crew to walk to it, `
+      + `and ${C.EXCLUSION_RADIUS} tiles' clearance of a living spawner. On a cliff it reaches `
+      + `${C.CLIFF_RANGE_BONUS} further.</p>`;
+    h += '<table><tr><th>tower</th><th>range</th><th>tiles</th><th>fire</th><th>fitting</th>'
+      + '<th>held</th><th>builds at</th><th>cost</th><th></th><th></th></tr>';
     for (const def of C.TOWERS) {
-      const order = { type: 'buildTower', q, r, towerIndex: def.i };
-      const can = O.canEnqueue(state, order);
-      // Every tier of this kind, and the one the emplacement would actually
-      // take — which is the tier the tower goes up at.
+      // Asked without a tile, because there is no tile yet: what a row can say
+      // here is whether the stores and the hold will run to it. Whether *this*
+      // ground will take it is the outline's job, once one is being carried.
+      const can = O.canOrderAnywhere(state, { type: 'buildTower', towerIndex: def.i });
       const held = proj.hold.filter((it) => it.tower === def.i).map((it) => it.tier).sort((a, b) => a - b);
       const takes = held[0] || 0;
       const tally = held.length
@@ -127,14 +150,45 @@ const VIEWS = {
       const heldText = tally
         ? [...tally.entries()].map(([t, n]) => `<b>t${t}</b>×${n}`).join(' ')
         : '<span class="why">none</span>';
+      const mine = state.towers.filter((tw) => tw.towerIndex === def.i);
+      // One button per tier held, so the choice of what to spend is the
+      // player's. The cheapest is still the one to reach for by default — a
+      // standing tower rises by having a better fitting put in, so a tier-1
+      // emplacement gets to the same place for less — but that is a default,
+      // not a rule, and the good fitting was not previously spendable at all.
+      const buttons = tally
+        ? [...tally.keys()].sort((a, b) => a - b).map((tier) => {
+          const one = O.canOrderAnywhere(state, { type: 'buildTower', towerIndex: def.i, tier });
+          return btn(`Build t${tier}`, 'place', { kind: 'tower', towerIndex: def.i, tier }, !one.ok);
+        }).join(' ')
+        : btn('Build', 'place', { kind: 'tower', towerIndex: def.i }, true);
       h += row([
-        `<b style="color:${def.colour}">${def.name}</b>`, def.range, def.fire,
-        esc(C.itemName(def.i)), heldText,
-        takes ? `tier <b>${takes}</b>` : '—',
-        costText(C.TOWER_COST), btn('Build', 'order', order, !can.ok),
+        `<b style="color:${def.colour}">${def.name}</b>`, def.range, def.tiles, def.fire,
+        `${esc(C.itemName(def.i))}<br><span class="dim">${C.itemSource(def.i) === 'iron'
+          ? 'Workshop, iron' : 'Merchant, gold'}</span>`, heldText,
+        takes ? `tier <b>${takes}</b> by default` : '—',
+        costText(C.TOWER_COST),
+        buttons + (mine.length ? ` <span class="dim">${mine.length} up</span>` : ''),
       ], !can.ok, can.ok ? '' : can.why);
     }
-    return h + '</table>';
+    h += '</table>';
+    if (standing) {
+      h += '<h3>standing</h3><table>';
+      for (const tw of state.towers) {
+        const d = C.TOWERS[tw.towerIndex];
+        const m = towerManning(state, tw);
+        h += row([
+          `<b style="color:${d.colour}">${d.name}</b>`,
+          `(${tw.q}, ${tw.r})`,
+          tw.evolved ? 'evolved' : `tier ${tw.tier}`,
+          `${towerPower(state, tw).toFixed(2)} dps`,
+          m.manned ? `manned ${m.crew.length}/${m.need}` : `<span class="why">unmanned ${m.crew.length}/${m.need}</span>`,
+          btn('Open', 'openTower', { id: tw.id }) + ' ' + btn('locate', 'locate', { q: tw.q, r: tw.r }),
+        ]);
+      }
+      h += '</table>';
+    }
+    return h;
   },
 
   tower(state, { id }, ui) {
@@ -160,7 +214,7 @@ const VIEWS = {
       const order = { type: 'fitItem', towerId: id, tier };
       const can = O.canEnqueue(state, order);
       h += row([`tier ${tier}`, `x${n}`,
-        `power ${C.power(tier).toFixed(2)}`, `${C.manningFor(tier)} hands, ${C.footprintFor(tier)} tiles`,
+        `power ${C.power(tier).toFixed(2)}`, `${C.manningFor(tier)} hands`,
         btn('Fit', 'order', order, !can.ok)], !can.ok, can.ok ? '' : can.why);
     }
     h += '</table>';
@@ -172,7 +226,7 @@ const VIEWS = {
       h += row([w.label, '', '', '', btn('Man', 'order', order, !can.ok)], !can.ok, can.ok ? '' : can.why);
     }
     for (const a of m.crew) {
-      h += row([`${a.who} is manning it`, '', '', '', btn('Stand down', 'order', { type: 'unassign', assignmentId: a.id })]);
+      h += row([`${a.who} is manning it`, '', '', '', btn('Stand down', 'standDown', { id: a.id })]);
     }
     h += '</table>';
 
@@ -224,6 +278,28 @@ const VIEWS = {
       return h;
     }
 
+    // The two houses that are also a shop. What they sell is not manning and not
+    // a crew upgrade, so it goes at the top of the panel, above both.
+    if (b.type === 'dock') {
+      const open = isBuildingManned(state, b);
+      h += '<h3>the counter</h3>';
+      h += `<p class="note">Wood, stone and iron over the counter in whatever amount, ` +
+        `bought or sold. A trade is struck on the spot — it costs no turn, takes nobody, ` +
+        `and never goes near the queue. This is beside the dock's own trade, which turns ` +
+        `${C.DOCK_INPUT} of the larger of wood and stone into ${C.DOCK_GOLD_OUT} gold every turn on its own.</p>`;
+      h += btn('Open the counter', 'openTrade', {}, !open) +
+        (open ? '' : ' <span class="why">nobody is working it</span>');
+    }
+    if (b.type === 'merchant') {
+      const open = isBuildingManned(state, b);
+      const wares = C.TOWERS.filter((d) => C.itemSource(d.i) === 'gold').map((d) => C.itemName(d.i));
+      h += '<h3>the wares</h3>';
+      h += `<p class="note">${esc(wares.join(', '))} — ${B.itemBuyCost(state)} gold apiece, and the only ` +
+        `door any of them comes through. They are picked off the Inventory panel like anything else in the hold.</p>`;
+      h += btn('Inventory', 'openInventory', {}, !open) +
+        (open ? '' : ' <span class="why">nobody is working it</span>');
+    }
+
     h += '<h3>manning</h3>';
     if (need === 0) {
       h += `<p class="note">It runs on nobody${def.crew === 0 ? '' : ' — upgraded, or standing inside a Bunkhouse, or both'}.` +
@@ -240,7 +316,7 @@ const VIEWS = {
     // whoever is in it can always be sent away, wanted or not
     for (const a of crew) {
       h += row([`${esc(crewName(state, a.who))} is manning it`, '', '', '',
-        btn('Stand down', 'order', { type: 'unassign', assignmentId: a.id })]);
+        btn('Stand down', 'standDown', { id: a.id })]);
     }
     h += '</table>';
 
@@ -254,9 +330,17 @@ const VIEWS = {
     return h;
   },
 
+  /**
+   * The hold, and the two shelves that fill it.
+   *
+   * A fitting has one house that supplies it and no other, so the panel is laid
+   * out as the two houses rather than as eight rows each offering both routes.
+   * That was the shape when either route served any fitting; it read as a
+   * choice between iron and gold, and there is no such choice — a Parrot Cage
+   * cannot be crafted at any price, and a Culverin is not for sale.
+   */
   inventory(state) {
     const cap = holdCap(state);
-    const workshop = hasBuilding(state, 'workshop');
     const proj = O.projectedItems(state);
     const held = (tower, tier) => proj.count(tower, tier);
 
@@ -264,51 +348,129 @@ const VIEWS = {
     h += `<p class="note">hold <b>${proj.hold.length}</b> / ${cap === Infinity ? 'unlimited' : cap}` +
       ' · every tower takes its own fitting, and they are not interchangeable' +
       ' · two of a kind at the same tier merge into the next</p>';
-    h += `<p class="${workshop ? 'note' : 'why'}">` +
-      (workshop ? 'A Workshop is working — fittings can be crafted from iron.' : 'Crafting needs an active Workshop.') +
-      '</p>';
-    h += `<p class="note">Only tier 1 is bought or crafted — ${B.itemBuyCost(state)} gold or ` +
-      `${B.itemCraftCost(state)} iron. Everything above it is merged.` +
-      (B.itemDiscount(state) < 1 ? ' The Weapons Master takes a quarter off both.' : '') + '</p>';
+    h += `<p class="note">Only tier 1 is made or bought — everything above it is merged, ` +
+      `which is free and wants no house at all.` +
+      (B.itemDiscount(state) < 1 ? ' The Weapons Master takes a quarter off both prices.' : '') + '</p>';
 
-    h += '<div class="shop">';
-    for (const def of C.TOWERS) {
-      const buy = { type: 'buyItem', tower: def.i };
-      const craft = { type: 'craftItem', tower: def.i };
-      const cb = O.canEnqueue(state, buy);
-      const cc = O.canEnqueue(state, craft);
-      const stack = [];
-      for (let tier = 1; tier <= C.MAX_TIER; tier++) {
-        const n = held(def.i, tier);
-        if (n) stack.push(`<span class="t${tier}">t${tier}&times;${n}</span>`);
+    for (const source of ['iron', 'gold']) {
+      const house = C.buildingDef(source === 'iron' ? 'workshop' : 'merchant');
+      const open = hasBuilding(state, house.type);
+      const kinds = C.TOWERS.filter((d) => C.itemSource(d.i) === source);
+      const price = source === 'iron'
+        ? `${B.itemCraftCost(state)} iron each`
+        : `${B.itemBuyCost(state)} gold each`;
+      h += `<h3>${esc(house.name)} — ${source === 'iron' ? 'crafted' : 'bought'}, ${price}</h3>`;
+      h += `<p class="${open ? 'note' : 'why'}">` + (open
+        ? `The ${esc(house.name)} is working — these can be had.`
+        : `Nothing on this shelf until a ${esc(house.name)} is built and manned. ` +
+          (source === 'iron'
+            ? 'Ironwork is made on the island or not at all.'
+            : 'Powder and livestock are nobody on this crew\'s trade; they are bought or they are not had.')) +
+        '</p>';
+      h += '<div class="shop">';
+      for (const def of kinds) {
+        const order = source === 'iron'
+          ? { type: 'craftItem', tower: def.i }
+          : { type: 'buyItem', tower: def.i };
+        const can = O.canEnqueue(state, order);
+        const stack = [];
+        for (let tier = 1; tier <= C.MAX_TIER; tier++) {
+          const n = held(def.i, tier);
+          if (n) stack.push(`<span class="t${tier}">t${tier}&times;${n}</span>`);
+        }
+        h += '<div class="item">';
+        h += `<div class="sq" style="border-color:${def.colour}">` +
+          `<b style="color:${def.colour}">${esc(C.itemName(def.i))}</b>` +
+          `<span>for the ${esc(def.name)}</span>` +
+          `<span class="dim">${def.fire}</span>` +
+          `<span class="stack">${stack.join(' ') || '<span class="dim">none held</span>'}</span></div>`;
+        h += '<div class="btns">';
+        h += btn(source === 'iron' ? `craft — ${B.itemCraftCost(state)} iron` : `buy — ${B.itemBuyCost(state)} gold`,
+          'order', order, !can.ok);
+        for (let tier = 1; tier < C.MAX_TIER; tier++) {
+          const merge = { type: 'mergeItems', tower: def.i, tier };
+          const cm = O.canEnqueue(state, merge);
+          if (!cm.ok && held(def.i, tier) < 2) continue; // only offer merges in reach
+          h += btn(`merge 2&times;t${tier} &rarr; t${tier + 1}`, 'order', merge, !cm.ok);
+        }
+        h += '</div>';
+        h += `<div class="why">${can.ok ? '' : esc(can.why)}</div>`;
+        h += '</div>';
       }
-      h += '<div class="item">';
-      h += `<div class="sq" style="border-color:${def.colour}">` +
-        `<b style="color:${def.colour}">${esc(C.itemName(def.i))}</b>` +
-        `<span>for the ${esc(def.name)}</span>` +
-        `<span class="dim">${def.fire}</span>` +
-        `<span class="stack">${stack.join(' ') || '<span class="dim">none held</span>'}</span></div>`;
-      h += '<div class="btns">';
-      h += btn(`buy — ${B.itemBuyCost(state)} gold`, 'order', buy, !cb.ok);
-      h += btn(`craft — ${B.itemCraftCost(state)} iron`, 'order', craft, !cc.ok);
-      for (let tier = 1; tier < C.MAX_TIER; tier++) {
-        const merge = { type: 'mergeItems', tower: def.i, tier };
-        const cm = O.canEnqueue(state, merge);
-        if (!cm.ok && held(def.i, tier) < 2) continue; // only offer merges in reach
-        h += btn(`merge 2&times;t${tier} &rarr; t${tier + 1}`, 'order', merge, !cm.ok);
-      }
-      h += '</div>';
-      h += `<div class="why">${!cb.ok && !cc.ok ? esc(cb.why || cc.why) : ''}</div>`;
       h += '</div>';
     }
-    h += '</div>';
+    return h;
+  },
+
+  /**
+   * The dock's counter: goods for gold, in whatever amount, struck on the spot.
+   *
+   * Two steps, deliberately. Everything else the player does is an order that
+   * sits in the queue with an x beside it until the turn ends, and this is the
+   * one thing that moves the stores the instant it is pressed — so it is said
+   * out loud in full, in gold and in goods, and confirmed before anything moves.
+   *
+   * What is on the counter is what the queue has not already spoken for. The
+   * stores in the bar are read the same way, and selling wood a queued Workshop
+   * was counting on would leave the resolve unable to pay for its own order.
+   */
+  trade(state, props) {
+    const have = O.projectedRes(state);
+    let h = '<h2>The dock counter</h2>';
+    h += `<p class="note">A trade is instant: no turn, no body, nothing queued. ` +
+      `The dock deals in whole gold both ways and never rounds in your favour.</p>`;
+    h += `<p class="note">On the counter is what the queue has not already spent — ` +
+      `gold <b>${have.gold}</b>${have.gold === state.res.gold ? '' : ` of ${state.res.gold} held`}.</p>`;
+    if (!hasBuilding(state, 'dock')) {
+      h += '<p class="why">No Trading Dock is working — the counter is shut.</p>';
+    }
+
+    // Sell and Buy carry the good and the direction, not the amount: the box
+    // beside them is read when the button is pressed. A modal is not rebuilt on
+    // a keystroke, so a button that had been rendered with a number in it would
+    // be carrying whatever was in the box the last time something else moved.
+    const shut = !hasBuilding(state, 'dock');
+    h += '<table><tr><th>goods</th><th>free of the queue</th><th>the dock pays</th>'
+      + '<th>the dock asks</th><th>amount</th><th></th><th></th></tr>';
+    for (const res of C.TRADE_GOODS) {
+      const good = C.TRADE[res];
+      const prop = `amount_${res}`;
+      const typed = String(props[prop] ?? '');
+      h += row([
+        `<b>${res}</b>`, Math.max(0, have[res] || 0),
+        `${good.sell} gold / ${good.per}`, `${good.buy} gold / ${good.per}`,
+        `<input data-prop="${prop}" size="7" value="${esc(typed)}"> ` +
+          btn('all held', 'fillTrade', { res }, shut),
+        btn('Sell', 'stageTrade', { res, dir: 'sell' }, shut) + ' ' +
+          btn('Buy', 'stageTrade', { res, dir: 'buy' }, shut),
+      ]);
+    }
+    h += '</table>';
+
+    const p = props.pending;
+    if (p) {
+      const can = O.canTrade(state, p);
+      const q = O.tradeQuote(state, p.res, p.dir, p.amount);
+      h += '<h3>confirm</h3>';
+      h += `<p>${p.dir === 'sell'
+        ? `Hand over <b>${q.amount} ${p.res}</b> and take <b>${q.gold} gold</b>.`
+        : `Pay <b>${q.gold} gold</b> and take <b>${q.amount} ${p.res}</b>.`} ` +
+        `<span class="note">The stores move the moment you press it.</span></p>`;
+      h += btn('Confirm', 'doTrade', p, !can.ok) + ' ' + btn('Cancel', 'cancelTrade', {}) +
+        (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
+    } else if (props.why) {
+      h += `<p class="why">${esc(props.why)}</p>`;
+    } else if (props.struck) {
+      h += `<p class="note">${esc(props.struck)}</p>`;
+    }
     return h;
   },
 
   economy(state, { q, r }) {
     const spot = q === undefined ? null : { q, r };
     let h = `<h2>Economic buildings</h2>`;
-    h += `<p class="note">Every building takes ${C.BUILDING_HANDS} hands to run (1 within ${C.BUNKHOUSE_RADIUS} of a Bunkhouse), ` +
+    h += `<p class="note">Every building takes ${C.BUILDING_HANDS} hands to run unless its own line says otherwise `
+      + `(1 within ${C.BUNKHOUSE_RADIUS} of a Bunkhouse), ` +
       'and each one is priced for what it does. Pick one and place it on the map — the outline shows green where the ground will take it.</p>';
     h += `<p class="note">A yard needs cleared ground, road beside it joined to the ship, ` +
       `and ${C.BUILDING_GAP} tile clear of the next building. A Palisade needs none of that.</p>`;
@@ -321,15 +483,23 @@ const VIEWS = {
       const stateOf = (b) => (b.ruined ? 'a ruin' : isBuildingManned(state, b)
         ? (handsNeededFor(state, b) === 0 ? 'working — no crew' : 'working')
         : `idle — ${assignmentsFor(state, b.id).filter((a) => arrived(state, a)).length}/${handsNeededFor(state, b)} crew`);
-      let state_ = built.length ? built.map(stateOf).join(', ') : '—';
+      // The queue counts as much as the map. Placing a second Forge was refused
+      // by the outline — "already in the queue" — but this list still offered a
+      // lit Build button and a state of "—", which is the list disowning an
+      // order sitting in the panel beside it.
+      const queued = B.queuedBuildingsOfType(state, def.type);
+      const parts = built.map(stateOf)
+        .concat(queued.map((p) => `queued at (${p.tiles[0].q}, ${p.tiles[0].r})`));
+      let state_ = parts.length ? parts.join(', ') : '—';
       let action = '';
       let why = '';
-      const already = built.length && !def.repeatable;
+      const already = (built.length + queued.length) > 0 && !def.repeatable;
       const cost = C.buildingCost(def.type);
+      if (already) why = built.length ? 'already built' : 'already in the queue';
       if (!already) {
         const afford = O.projectedRes(state);
         const poor = Object.entries(cost).find(([k, v]) => afford[k] < v);
-        action = btn('Build', 'place', { building: def.type }, !!poor);
+        action = btn('Build', 'place', { kind: 'building', type: def.type }, !!poor);
         if (poor) why = `needs ${poor[1]} ${poor[0]}`;
       }
       // Each building has a panel of its own — manning, its upgrade and its
@@ -339,13 +509,15 @@ const VIEWS = {
         extra += ' ' + btn(built.length > 1 ? `${b.name} (${b.q},${b.r})` : 'Open', 'openBuilding', { id: b.id });
       }
       h += row([`<b>${def.name}</b>`, def.tiles, costText(cost), def.effect, state_, action + extra],
-        !!built.length && !def.repeatable, why);
+        already, why);
     }
     return h + '</table>';
   },
 
   crew(state) {
-    const tasks = O.projectedAssignments(state);
+    // Named to the body that will actually take each job, so a queued "a hand"
+    // row says which hand and that hand is not also listed as standing about.
+    const { tasks, busy } = O.projectedRoster(state);
     const idleOff = O.projectedIdleOfficers(state);
     let h = `<h2>Crew</h2><p class="note">${handCount(state)} hands (cap ${state.crew.cap + state.crew.capBonus}), ` +
       `${O.projectedHands(state)} idle once the queue runs · officers replace a hand one for one · ` +
@@ -361,13 +533,12 @@ const VIEWS = {
       const stop = a.queued
         ? `<button data-x="revoke" data-arg='${esc(JSON.stringify({ id: a.id }))}'>x</button>`
         : a.kind === 'assault' ? ''
-          : btn('Idle', 'order', { type: 'reassign', assignmentId: a.id, kind: 'idle' });
+          : btn('Idle', 'standDown', { id: a.id });
       h += `<tr class="${a.queued ? 'queued' : ''}"><td>${who}</td><td>${a.kind}</td>` +
         `<td>${target}</td><td>${when}</td><td>${stop} ${locateBtn(state, a.who)}</td></tr>`;
     }
     // everyone else is standing about somewhere, which is where their next walk
     // is measured from
-    const busy = new Set(tasks.map((a) => a.who));
     for (const m of state.crew.members) {
       if (busy.has(m.id)) continue;
       const officer = officerById(state, m.id);
@@ -383,8 +554,9 @@ const VIEWS = {
 
   /** Ending the turn while bodies stand about: who they are, and a way past. */
   idleWarning(state) {
-    const tasks = O.projectedAssignments(state);
-    const busy = new Set(tasks.map((a) => a.who));
+    // The same register the crew panel reads, and for the same reason: this box
+    // is opened by the count in the bar, so it has to agree with it.
+    const { busy } = O.projectedRoster(state);
     const spare = state.crew.members.filter((m) => !busy.has(m.id));
     const hands = spare.filter((m) => m.kind === 'hand');
     const officers = spare.filter((m) => m.kind === 'officer');
@@ -463,6 +635,20 @@ const VIEWS = {
     const t = tileAt(state, q, r);
     let h = `<h2>${esc(tileLabel(state, { q, r }))}</h2>`;
 
+    // Ground a queued structure is standing on. The plot is not on the map yet,
+    // so the tile reads as bare road and used to say "nothing to do here" —
+    // with the yard outlined on it and its order in the panel beside it. Taking
+    // it back is the whole reason to click a plot you have placed.
+    const plots = O.queuedStructuresAt(state, { q, r });
+    if (plots.length) {
+      h += '<h3>queued here</h3><table>';
+      for (const o of plots) {
+        h += row([esc(O.describe(state, o)), '', '', '',
+          btn('Cancel', 'revoke', { id: o.id })]);
+      }
+      h += '</table>';
+    }
+
     const already = O.workersOn(state, { q, r });
     if (already.length) {
       h += '<h3>already spoken for</h3><table>';
@@ -471,7 +657,7 @@ const VIEWS = {
         const who = officer ? `<b>${esc(crewName(state, a.who))}</b>` : esc(crewName(state, a.who));
         const stop = a.queued
           ? `<button data-x="revoke" data-arg='${esc(JSON.stringify({ id: a.id }))}'>x</button>`
-          : btn('Stand down', 'order', { type: 'reassign', assignmentId: a.id, kind: 'idle' });
+          : btn('Stand down', 'standDown', { id: a.id });
         h += `<tr class="${a.queued ? 'queued' : ''}"><td>${who}</td><td>${a.kind}</td>` +
           `<td>${taskState(state, a)}</td><td></td><td>${stop}</td></tr>`;
       }
@@ -511,12 +697,28 @@ const VIEWS = {
     }
 
     // ground with nothing on it and nothing to cut: say so rather than show a
-    // box with nothing in it
-    if (!already.length && !(t && isClearable(state, t)) && !(t && t.feature && !t.featureWorked)
+    // box with nothing in it. Not if a structure is queued on it — there is
+    // plainly something to do there, and it is offered above.
+    if (!already.length && !plots.length && !(t && isClearable(state, t))
+        && !(t && t.feature && !t.featureWorked)
         && !(t && t.terrain === 'freshwater' && !t.bridge)) {
+      // Cliff is towers-only ground: it takes a gun and nothing else, so it
+      // must not be told it cannot be built on, and must not be offered a yard.
+      const towersOnly = t && isBuildable(state, t, true) && !isBuildable(state, t, false);
       h += `<p class="note">Nothing to do here. ${t && isOpenGround(t)
         ? 'The crew can walk over this ground, but there is nothing on it to work.'
-        : 'This ground cannot be cut, built on or crossed.'}</p>`;
+        : towersOnly
+          ? 'This ground cannot be cut or crossed.'
+          : 'This ground cannot be cut, built on or crossed.'}</p>`;
+      // Cleared ground with nothing on it is where a gun goes, and the gun is
+      // no longer picked from here — so say where it is picked from.
+      if (t && isBuildable(state, t, true)) {
+        h += towersOnly
+          ? '<p class="note">A tower could stand here: pick one off <b>Towers</b> in the bar '
+            + 'and place it with a click.</p>'
+          : '<p class="note">A tower or a yard could stand here: pick one off <b>Towers</b> '
+            + 'or <b>Economy</b> in the bar and place it with a click.</p>';
+      }
     }
     if (t && t.terrain === 'freshwater' && !t.bridge) {
       const order = { type: 'buildBridge', q, r };
@@ -589,7 +791,27 @@ const VIEWS = {
     // means re-rendering the modal on every keystroke, and this box is read once.
     if (props.why) h += `<p class="why">${esc(props.why)}</p>`;
     h += '<p>' + btn('Start run', 'startRun') + '</p>';
-    h += '<p class="note">The run on the screen is lost. Nothing persists between runs.</p>';
+    h += '<p class="note">The run on the screen is lost — including the saved one, '
+      + 'which is this run and no other.</p>';
+    return h;
+  },
+
+  /**
+   * The same island again, from turn 1.
+   *
+   * It asks first for the same reason New run has always had a panel of its own:
+   * it is the one button on the bar that throws a run away, and a run now
+   * survives closing the tab, so the thing being thrown away is no longer just
+   * what is on the screen.
+   */
+  restartMap(state) {
+    let h = '<h2>Restart this map</h2>';
+    h += `<p class="note">Seed <b>${state.seed}</b> again, from turn 1 — the same ground, `
+      + 'the same spawners, the same chests. What changes is what you do with it.</p>';
+    h += `<p class="why">Turn ${state.turn} of the run on the screen is lost, and so is the `
+      + 'saved copy of it.</p>';
+    h += '<p>' + btn('Restart map', 'restartMap') + ' ' + btn('Keep playing', 'close') + '</p>';
+    h += '<p class="note">For a different island, use <b>New run</b> instead.</p>';
     return h;
   },
 
@@ -638,7 +860,7 @@ export function taskState(state, a) {
 
 function standingOnJob(state, a) {
   const m = memberById(state, a.who);
-  const to = jobPlace(state, a);
+  const to = jobPlace(state, a, m);
   return !!m && !!to && m.q === to.q && m.r === to.r;
 }
 
@@ -836,7 +1058,7 @@ function manTargetName(state, id) {
 }
 
 function roadWord(state, sp) {
-  return roadReaches(state, sp) ? '<span class="good">yes</span>' : '<span class="bad">no</span>';
+  return networkReaches(state, sp) ? '<span class="good">yes</span>' : '<span class="bad">no</span>';
 }
 
 export function summarise(events) {
@@ -877,12 +1099,61 @@ export function summarise(events) {
 
 const ACTIONS = {
   openBuilding(state, payload, ui) { open('building', { id: payload.id }, ui); },
+  openTrade(state, payload, ui) { open('trade', {}, ui); },
+  openInventory(state, payload, ui) { open('inventory', {}, ui); },
+  // The counter, in three parts: fill the box, stage what was asked for, and
+  // strike it. Nothing here touches the stores until `doTrade`.
+  fillTrade(state, payload, ui) {
+    current.props[`amount_${payload.res}`] = String(O.tradeMost(state, payload.res) || '');
+    ui.refresh();
+  },
+  stageTrade(state, payload, ui) {
+    // The amount is whatever is in the box now, not whatever was in it when the
+    // button was drawn. Read off the element first and the props second: the
+    // props are written by `oninput`, and a value put into the box by anything
+    // that does not raise one — an autofill, a driver — is still what the player
+    // is looking at when they press Sell.
+    const box = document.querySelector(`[data-prop="amount_${payload.res}"]`);
+    const amount = Number(String((box && box.value) || current.props[`amount_${payload.res}`] || '').trim());
+    const want = { ...payload, amount };
+    const can = O.canTrade(state, want);
+    // written back, so the box still shows what is being confirmed: the panel
+    // is rebuilt from the props, and anything only in the element is gone
+    if (can.ok) current.props[`amount_${payload.res}`] = String(amount);
+    current.props.pending = can.ok ? want : null;
+    current.props.why = can.ok ? '' : can.why;
+    current.props.struck = '';
+    ui.refresh();
+  },
+  cancelTrade(state, payload, ui) {
+    current.props.pending = null;
+    current.props.why = '';
+    ui.refresh();
+  },
+  doTrade(state, payload, ui) {
+    const done = ui.trade(payload);
+    if (!done.ok) return ui.refresh();
+    current.props.pending = null;
+    current.props.why = '';
+    current.props[`amount_${payload.res}`] = '';
+    current.props.struck = payload.dir === 'sell'
+      ? `${done.amount} ${payload.res} sold for ${done.gold} gold.`
+      : `${done.amount} ${payload.res} bought for ${done.gold} gold.`;
+    ui.refresh();
+  },
+  openTower(state, payload, ui) { open('tower', { id: payload.id }, ui); },
   order(state, payload, ui) { ui.order(payload); ui.refresh(); },
   orderClose(state, payload, ui) { ui.order(payload); close(ui); },
   revoke(state, payload, ui) { ui.revoke(payload.id); ui.refresh(); },
-  place(state, payload, ui) { ui.place(payload.building); close(ui); },
+  // Not an order: the body is loose the moment the button is pressed, and the
+  // panel it was pressed in redraws with them on the list of who is free.
+  standDown(state, payload, ui) { ui.standDown(payload.id); ui.refresh(); },
+  // Either a yard or a gun: the payload is the thing itself, and the map's
+  // outline and the click that puts it down both read it the same way.
+  place(state, payload, ui) { ui.place(payload); close(ui); },
   locate(state, payload, ui) { close(ui); ui.locate(payload); },
   newRun(state, payload, ui) { open('newRun', {}, ui); },
+  restartMap(state, payload, ui) { current = null; ui.restart(); },
   rollSeed(state, payload, ui) {
     open('newRun', { seed: 1 + Math.floor(Math.random() * 2147483646) }, ui);
   },

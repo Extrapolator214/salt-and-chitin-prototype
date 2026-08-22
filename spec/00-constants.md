@@ -144,7 +144,7 @@ Loss condition: `hull <= 0`.
 | power by tier | 1 · 2.5 · 6.25 · 15.63 · 39.06 |
 | `EVOLVED_MULT` | 2.5 → evolved tier 5 = 97.66 |
 | manning by tier | t1–3: 1 hand · t4: 2 · t5: 2 · evolved: 3 |
-| footprint by tier | t1–3: 1 tile · t4–5: 2 tiles · evolved: 3 tiles |
+| footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below |
 | `TOWER_BUILD_COST` | 30 wood + 20 stone, plus one fitting of its kind from the hold, any tier |
 | `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory |
 | `CLIFF_RANGE_BONUS` | +1 tile |
@@ -155,20 +155,40 @@ in place; the displaced item returns to inventory.
 
 An **unmanned tower stands and does not fire.** That is a legal board state.
 
+A tower's **footprint is a property of the gun and never changes.** It is laid
+out of `BUILDING_SHAPES` on the tile the player placed it on, exactly as a yard
+is, and the whole of it must be free, cleared and buildable before the order is
+taken. Tiering a standing tower changes its power and its manning and nothing
+else — the better gun goes into the emplacement that is already there.
+
+| constant | value | note |
+|---|---|---|
+| `SHOT_INTERVAL` | fast 0.16 s · normal 0.42 s · slow 0.85 s | seconds between rounds leaving a gun |
+| `PROJECTILE_SPEED` | 11 tiles/s | |
+| `PROJECTILE_MAX` | 300 | a ceiling for a fight run out unwatched |
+| `IMPACT_SECONDS` | 0.18 | how long the flash where a round lands is drawn |
+
+Damage is a rate and is applied every tick. The rounds above carry none of it:
+they are how the fight is told, thrown on each gun's own cadence at the spot the
+target was standing on when the trigger went.
+
 ### The eight towers (indices 0–7)
 
 Island 1 ships the Gunnery and Beasts shelves only.
 
-| # | tower | shelf | range | fire | essence lent |
-|---:|---|---|---:|---|---|
-| 0 | Swivel Gun Post | gunnery | 3 | fast single target | Scatter |
-| 1 | Culverin Battery | gunnery | 8 | slow single target | Bore |
-| 2 | Chain-Shot Gallery | gunnery | 5 | pierces a file along the road | Rake |
-| 3 | Dynamite Throwers | gunnery | 5 | slow blast, radius 1 | Blast |
-| 4 | Parrot Swarm Aviary | beasts | 5 | many weak hits, up to 4 targets | Swarm |
-| 5 | Alligator Guards | beasts | 1 | holds what it hits in place | Snag |
-| 6 | Krakenling Well | beasts | 1 | hits every adjacent road tile | Sweep |
-| 7 | Monkey Riggers | beasts | 3 | yields 2 gold per kill | Plunder |
+| # | tower | shelf | range | tiles | rate | fire | essence lent |
+|---:|---|---|---:|---:|---|---|---|
+| 0 | Swivel Gun Post | gunnery | 3 | 1 | fast | fast single target | Scatter |
+| 1 | Culverin Battery | gunnery | 8 | 2 | slow | slow single target | Bore |
+| 2 | Chain-Shot Gallery | gunnery | 5 | 2 | normal | pierces a file along the road | Rake |
+| 3 | Dynamite Throwers | gunnery | 5 | 2 | slow | slow blast, radius 1 | Blast |
+| 4 | Parrot Swarm Aviary | beasts | 5 | 3 | fast | many weak hits, up to 4 targets | Swarm |
+| 5 | Alligator Guards | beasts | 1 | 2 | normal | holds what it hits in place | Snag |
+| 6 | Krakenling Well | beasts | 1 | 1 | normal | hits every adjacent road tile | Sweep |
+| 7 | Monkey Riggers | beasts | 3 | 1 | normal | yields 2 gold per kill | Plunder |
+
+`tiles` is the gun's yard; `rate` is its cadence on the map, which is a telling
+and not a damage number.
 
 All eight deal `power(tier)` damage per second within range. The `fire` column is
 the shape of the damage, not a separate number:
@@ -198,17 +218,47 @@ partner's essence effect.
 | constant | value |
 |---|---|
 | `ITEM_CRAFT_IRON` | 6 (Workshop) |
-| `ITEM_BUY_GOLD` | 8 (ship or Trading Dock) |
+| `ITEM_BUY_GOLD` | 8 (Peculiar Merchant) |
 | merge | 2 items of tier *n* → 1 of tier *n+1* |
 | tier-*n* cost | `2^(n-1)` tier-1 items |
 
 Items merge in the inventory only — never on the board. Merging is free.
 
+**One house per fitting** (build rule). Neither price is a shop the ship carries
+with it. Each tower's fitting names its `source`, and there is exactly one route
+to it: the ironwork — Swivel Gun, Culverin, Chain-Shot — is crafted at a
+**Workshop** for `ITEM_CRAFT_IRON`, and the other five are bought off a
+**Peculiar Merchant** for `ITEM_BUY_GOLD`. What is crafted cannot be bought and
+what is bought cannot be crafted, so a shelf of the gun catalogue is shut until
+its house stands and is manned. Merging needs no house.
+
+---
+
+## 8b · The dock counter (build rule)
+
+Wood, stone and iron bought and sold to order at a manned **Trading Dock**, in
+whatever amount. A trade is instant: it costs no turn, takes no hand and never
+enters the order queue — but it is struck against what the queue has *not*
+already spent, so wood a queued building is counting on cannot be sold.
+
+| good | dock pays | dock asks |
+|---|---|---|
+| wood | 1 gold / 12 | 2 gold / 12 |
+| stone | 1 gold / 12 | 2 gold / 12 |
+| iron | 1 gold / 1 | 2 gold / 1 |
+
+Whole gold both ways, rounded against the player: `floor` on a sale and `ceil`
+on a purchase, so a handful of wood is worth nothing and is refused rather than
+taken for nothing. The wood and stone sale rate is `DOCK_INPUT` for
+`DOCK_GOLD_OUT` — the counter pays exactly what the dock's own standing trade
+pays, so trading by hand is a matter of timing, not of rate.
+
 ---
 
 ## 9 · Economic buildings
 
-Each costs **120 wood + 80 stone** and **2 hands** (1 inside a Bunkhouse radius).
+Each costs **120 wood + 80 stone** and **2 hands** (1 inside a Bunkhouse radius),
+unless its own entry in `C.BUILDINGS` names a `cost` or a `crew` of its own.
 
 **Shape** (build rule). Every building has one fixed shape for its tile count
 (`C.BUILDING_SHAPES`): the anchor tile plus its neighbours in ring order, so the
@@ -217,8 +267,9 @@ player clicked. Footprints are never grown to fit the ground — a plot takes th
 whole shape or the placement is refused — so a building is the same silhouette
 everywhere and can carry one picture.
 
-**Manning** (build rules). A building wants `BUILDING_HANDS`, one fewer inside a
-Bunkhouse's radius, and one fewer again once its **crew upgrade** is bought for
+**Manning** (build rules). A building wants `BUILDING_HANDS` — or its own `crew`,
+where it names one, as the Peculiar Merchant's single hand — one fewer inside a
+Bunkhouse's radius (never more than it wanted to begin with), and one fewer again once its **crew upgrade** is bought for
 `CREW_UPGRADE_GOLD`. The two stack, so an upgraded yard standing inside a
 Bunkhouse's radius wants nobody at all — which is as far down as it goes, and the
 upgrade is refused for a building already there. The spec's "upgrade to run
@@ -233,8 +284,9 @@ building that wants two takes two, and the third order is refused.
 |---|---:|---:|---|
 | Warehouse | 3 | 5 | inventory becomes unlimited |
 | Forge | 2 | 4 | 3 stone → 1 iron per turn |
-| Workshop | 3 | 5 | items craftable at 6 iron |
-| Trading Dock | 3 | 5 | 12 wood or stone → 1 gold per turn |
+| Workshop | 3 | 5 | the iron fittings craftable at 6 iron |
+| Trading Dock | 3 | 5 | 12 wood or stone → 1 gold per turn, and the counter of §8b |
+| Peculiar Merchant | — | 3 | the gold fittings buyable at 8 gold; 1 hand |
 | Tinker's Shed | 3 | 4 | evolutions can be performed |
 | Sappers' Camp | 3 | 6 | assault teams can be raised |
 | Hospital | 2 | 3 | assault downtime 3 turns → 1 |

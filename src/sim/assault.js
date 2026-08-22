@@ -3,7 +3,7 @@
 import C from './config.js';
 import { addLog, nextId, draw, hasBuilding, idleHands, idleOfficers, officerById, officerFor } from './state.js';
 import { assign } from './labour.js';
-import { roadReaches, killSpawner } from './enemy.js';
+import { networkReaches, killSpawner } from './enemy.js';
 
 const no = (why) => ({ ok: false, why });
 const ok = { ok: true };
@@ -31,7 +31,7 @@ export function canSchedule(state, spawnerId, leaderId) {
   if (!sp || !sp.alive) return no('no such spawner');
   if (!hasBuilding(state, 'sappers')) return no("needs a manned Sappers' Camp");
   if (state.assaults.some((a) => a.targetSpawnerId === spawnerId && a.state !== 'done')) return no('already under way');
-  if (!roadReaches(state, sp)) return no('no road path reaches it');
+  if (!networkReaches(state, sp)) return no('no open ground reaches it');
   const need = assaultHands(state) - (leaderId ? 1 : 0);
   if (idleHands(state) < need) return no(`needs ${need} idle hands`);
   if (leaderId && !idleOfficers(state).some((o) => o.id === leaderId)) return no('that officer is busy');

@@ -14,7 +14,7 @@ import * as St from '../src/sim/state.js';
 import * as O from '../src/sim/orders.js';
 import * as B from '../src/sim/build.js';
 import { resolveTurn, concludeTurn } from '../src/sim/turn.js';
-import { skip, finishCombat } from '../src/sim/combat.js';
+import { skip, finishCombat, beginCombat, tick } from '../src/sim/combat.js';
 import { putCrewOnFrontier, driveRoadGang, workFeatures } from './route.mjs';
 
 let pass = 0, fail = 0;
@@ -76,6 +76,56 @@ late.res.wood = 1e6; late.res.stone = 1e6; late.res.gold = 1e6;
   if (yard) B.buildBuilding(late, 'forge', yard.q, yard.r);
 }
 
+// A resolve held part-way through, which nothing else here reaches: the rounds
+// in the air and the health bar over every unit are drawn off combat state, and
+// `play` above skips straight past all of it.
+const fighting = St.createState(20260816);
+{
+  // a lane cut from the ship out towards the near spawner, so the swarm walks
+  // ground the guns can both see and shoot at
+  const sp = fighting.spawners[0];
+  const lane = H.line(fighting.base, sp).slice(0, 9);
+  for (const p of lane) {
+    const tt = St.tileAt(fighting, p.q, p.r);
+    if (tt && !tt.occupant) { tt.terrain = 'road'; tt.cleared = true; }
+  }
+  // a gun beside it, so a tower's rounds are in the air as well as the ship's.
+  // The fitting goes into the hold first: without one the site is refused for
+  // the hold rather than for the ground.
+  B.addItem(fighting, 0, 1);
+  for (const h of H.spiral(lane[4], 2)) {
+    const tt = St.tileAt(fighting, h.q, h.r);
+    if (!tt || tt.occupant) continue;
+    tt.terrain = 'road'; tt.cleared = true;
+    St.touchMap(fighting);
+    if (!B.canBuildTower(fighting, h.q, h.r, 0).ok) continue;
+    B.buildTower(fighting, h.q, h.r, 0).complete = true;
+    St.landHands(fighting, 1);
+    fighting.crew.assignments.push({
+      id: 'man-test', who: fighting.crew.members[0].id, kind: 'man',
+      target: fighting.towers[0].id, arrivesOnTurn: 0,
+    });
+    break;
+  }
+  St.touchMap(fighting);
+  const cohort = {
+    spawnerId: sp.id,
+    units: [
+      { type: 'grub' }, { type: 'grub' }, { type: 'shell' },
+      { type: 'shell', elite: true }, { type: 'grub', role: 'shield' }, { type: 'grub', role: 'healer' },
+    ],
+  };
+  beginCombat(fighting, [{ cohort, entry: lane[lane.length - 1] }], []);
+  for (let i = 0; i < 120; i++) tick(fighting, 1 / 30);
+}
+t('the fixture stands a manned gun beside the lane',
+  fighting.towers.length === 1 && St.towerPower(fighting, fighting.towers[0]) > 0,
+  `${fighting.towers.length} tower(s), ${fighting.towers.length ? St.towerPower(fighting, fighting.towers[0]) : 0} dps`);
+t('a resolve puts rounds in the air',
+  fighting.combat.projectiles.length + fighting.combat.impacts.length > 0,
+  `${fighting.combat.projectiles.length} in flight, ${fighting.combat.impacts.length} landing, `
+  + `${fighting.combat.killed} killed`);
+
 /** Everything on the island, nudged half a hex off its own tile. */
 const midStride = (s) => ({
   crew: new Map(s.crew.members.map((m) => [m.id, { q: m.q + 0.5, r: m.r - 0.5 }])),
@@ -83,12 +133,17 @@ const midStride = (s) => ({
 });
 
 const frames = [];
-for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late]]) {
+for (const [label, s] of [['a fresh landing', fresh], ['forty turns in', late], ['mid-resolve', fighting]]) {
   for (const zoom of [0, camera.ZOOMS.length - 1]) {           // the baked layer, and the live one
     for (const [what, ui] of [
       ['idle', { hover: null }],
       ['hovering', { hover: { q: s.base.q, r: s.base.r } }],
-      ['placing a building', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: 'forge' }],
+      ['placing a building', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: { kind: 'building', type: 'forge' } }],
+      // the one building whose effect travels, so its coverage blob is drawn
+      ['placing a Bunkhouse', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: { kind: 'building', type: 'bunkhouse' } }],
+      // one tile and three, so both a single hex and a grown silhouette are laid
+      ['placing a one-tile gun', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: { kind: 'tower', towerIndex: 0 } }],
+      ['placing a three-tile gun', { hover: { q: s.base.q - 3, r: s.base.r - 3 }, placing: { kind: 'tower', towerIndex: 4 } }],
       // Mid-reel: every body and every blob is between hexes, so the two passes
       // that take fractional coordinates are drawn as well as the integer ones.
       ['mid-march', { hover: null, reel: {}, walk: midStride(s) }],
@@ -478,11 +533,20 @@ t(`the map draws in every mode without throwing`, !threw,
   // that drifts back the moment either one is edited.
   {
     const idle = reel.panelHtml(null, 3);
-    t('idle, the panel is the settings and a skip with nothing to skip',
+    t('idle, the panel is the three settings and nothing that cannot be pressed',
       idle.includes('Resolve turn animation') && idle.includes('data-r="3" class="on"')
-      && !idle.includes('data-r="next"') && (idle.match(/disabled/g) || []).length === 1
+      && !idle.includes('data-r="next"') && !idle.includes('disabled')
       && !idle.includes('reel-bar'),
       'idle panel');
+
+    // Skip is a setting beside the speeds, not a control that only exists while
+    // there is something to abandon: it is pressable and shows as chosen with no
+    // reel anywhere, and it says what it does to the turns that follow.
+    const off = reel.panelHtml(null, 'skip');
+    t('skip is one of the settings, pressed and standing',
+      off.includes('data-r="skip" class="on"') && !off.includes('disabled')
+      && off.includes('off — turns resolve without it'),
+      'skip panel');
 
     const live = { beats: [{ kind: 'breed', spawners: [], focus: null, seconds: 1 }], i: 0, t: 0, speed: 1, done: false };
     const panel = reel.panelHtml(live, 1);

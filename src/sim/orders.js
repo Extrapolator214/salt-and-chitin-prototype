@@ -7,7 +7,7 @@ import { distance, key, parseKey, neighbours, NEIGHBOURS } from './hex.js';
 import {
   tileAt, addLog, nextId, idleHands, idleOfficers, officerById, holdFree, holdCap,
   hasBuilding, isBuildingManned, buildingsOfType, walkableForWork, isClearable, memberById,
-  handsNeededFor, towerManning, isHand, crewHeld,
+  handsNeededFor, towerManning, isHand, crewHeld, crewName,
 } from './state.js';
 import * as B from './build.js';
 import {
@@ -19,19 +19,6 @@ import * as A from './assault.js';
 const ok = { ok: true };
 const no = (why) => ({ ok: false, why });
 const NO_COST = {};
-
-/**
- * The hand an order hands back, if any.
- *
- * Standing a worker down frees them, and `projectedHands` has to see it or the
- * next order in the same phase is refused for want of a body the player has
- * just released. Only a hand counts: an officer is not one of the ten, and
- * crediting one for him used to conjure a hand that did not exist.
- */
-const handFreed = (state, assignmentId) => {
-  const a = state.crew.assignments.find((x) => x.id === assignmentId);
-  return a && isHand(a.who) ? -1 : 0;
-};
 
 /**
  * Put a worker on a job, and say so out loud if there was nobody to put on it.
@@ -244,10 +231,37 @@ export function queuedTiles(state) {
       if (o.type === 'buildBuilding') {
         const def = C.buildingDef(o.building);
         for (const p of B.footprintPreview(state, o.q, o.r, def.tiles, false, o.building)) out.push({ q: p.q, r: p.r, kind: o.type });
+      } else if (o.type === 'buildTower') {
+        // A gun stands on its own yard now, so the whole of it is marked, not
+        // only the tile the order names.
+        for (const p of C.towerTiles(o.towerIndex, o.q, o.r)) out.push({ q: p.q, r: p.r, kind: o.type });
       } else out.push({ q: o.q, r: o.r, kind: o.type });
     }
   }
   return out;
+}
+
+/**
+ * Queued structures standing on this tile — the orders themselves, not just the
+ * fact that the ground is spoken for.
+ *
+ * `queuedTiles` above answers "is this hex claimed", which is all the map needs
+ * to shade it. The tile panel needs the order, because the only thing anyone
+ * wants to do with a plot they have changed their mind about is take it back —
+ * and with the catalogue moved to the bar, a click on the tile was the one
+ * gesture that still pointed at the thing they had placed.
+ */
+export function queuedStructuresAt(state, at) {
+  const covers = (tiles) => tiles.some((p) => p.q === at.q && p.r === at.r);
+  return state.orders.filter((o) => {
+    if (o.type === 'buildBuilding') {
+      const def = C.buildingDef(o.building);
+      return !!def && covers(C.buildingTiles(def.tiles, o.q, o.r));
+    }
+    if (o.type === 'buildTower') return covers(C.towerTiles(o.towerIndex, o.q, o.r));
+    if (o.type === 'buildBridge') return o.q === at.q && o.r === at.r;
+    return false;
+  });
 }
 
 /**
@@ -353,8 +367,6 @@ export const ORDERS = {
   reassign: {
     label: (o) => 'redeploy a worker',
     cost: () => NO_COST,
-    // standing one down is the only redeployment that frees a body
-    hands: (o, state) => (o.kind === 'idle' ? handFreed(state, o.assignmentId) : 0),
     check: (state, o) => {
       const a = state.crew.assignments.find((x) => x.id === o.assignmentId);
       if (!a) return no('gone');
@@ -369,7 +381,9 @@ export const ORDERS = {
       }
       // this worker's own walk, not the crew's reach: a body cut off out on the
       // island can be standing beside ground the rest of the company can get to
-      const to = o.kind === 'man' ? jobPlace(state, { kind: 'man', target: o.targetId }) : o.target;
+      const to = o.kind === 'man'
+        ? jobPlace(state, { kind: 'man', target: o.targetId }, memberById(state, a.who))
+        : o.target;
       if (to && !Number.isFinite(travelTurnsFor(state, a.who, to, crewGroundAtResolve(state)))) {
         return no('no way to walk there from where they stand');
       }
@@ -377,33 +391,25 @@ export const ORDERS = {
     },
     apply: (state, o, events, held) => {
       const a = state.crew.assignments.find((x) => x.id === o.assignmentId);
-      if (o.kind === 'idle') { dropAssignment(state, a.id); recomputeCapBonus(state); return; }
       a.kind = o.kind;
       a.target = o.kind === 'man' ? o.targetId : o.target;
       // the new walk starts from wherever this one has got to
       const m = memberById(state, a.who);
       a.from = m ? { q: m.q, r: m.r } : a.from;
       a.leftOn = state.turn;
-      const turns = travelTurnsFor(state, a.who, jobPlace(state, a), held);
+      const turns = travelTurnsFor(state, a.who, jobPlace(state, a, m), held);
       a.arrivesOnTurn = state.turn + (Number.isFinite(turns) ? turns : 0);
       recomputeCapBonus(state);
     },
   },
 
-  unassign: {
-    label: () => 'unassign',
-    cost: () => NO_COST,
-    hands: (o, state) => handFreed(state, o.assignmentId),
-    check: (state, o) => (state.crew.assignments.some((a) => a.id === o.assignmentId) ? ok : no('gone')),
-    apply: (state, o) => { dropAssignment(state, o.assignmentId); recomputeCapBonus(state); },
-  },
-
   buildTower: {
-    label: (o, state) => `build ${C.TOWERS[o.towerIndex].name} on ${tileLabel(state, o)}`,
+    label: (o, state) => `build ${C.TOWERS[o.towerIndex].name}`
+      + (o.tier ? ` at tier ${o.tier}` : '') + ` on ${tileLabel(state, o)}`,
     cost: () => C.TOWER_COST,
-    check: (state, o) => B.canBuildTower(state, o.q, o.r, o.towerIndex),
+    check: (state, o) => B.canBuildTower(state, o.q, o.r, o.towerIndex, o.tier),
     apply: (state, o, events) => {
-      const t = B.buildTower(state, o.q, o.r, o.towerIndex);
+      const t = B.buildTower(state, o.q, o.r, o.towerIndex, o.tier);
       events.push({ kind: 'built', what: C.TOWERS[o.towerIndex].name, id: t.id, q: o.q, r: o.r });
     },
   },
@@ -454,11 +460,16 @@ export const ORDERS = {
     },
   },
 
+  // Neither route is open on the beach. A fitting has one house that supplies
+  // it and no other — gold ones off the Peculiar Merchant, iron ones out of the
+  // Workshop — so the hold is filled by first standing the house up.
   buyItem: {
     label: (o) => `buy a ${C.itemName(o.tower)}`,
     cost: (state) => ({ gold: B.itemBuyCost(state) }),
     check: (state, o) => {
       if (!C.TOWERS[o.tower]) return no('no such fitting');
+      if (C.itemSource(o.tower) !== 'gold') return no(`a ${C.itemName(o.tower)} is crafted, not bought`);
+      if (!hasBuilding(state, 'merchant')) return no('needs a manned Peculiar Merchant');
       return holdFree(state) > 0 ? ok : no('the hold is full');
     },
     apply: (state, o, events) => { B.addItem(state, o.tower, 1); events.push({ kind: 'item', how: 'bought', tower: o.tower }); },
@@ -469,6 +480,7 @@ export const ORDERS = {
     cost: (state) => ({ iron: B.itemCraftCost(state) }),
     check: (state, o) => {
       if (!C.TOWERS[o.tower]) return no('no such fitting');
+      if (C.itemSource(o.tower) !== 'iron') return no(`nobody makes a ${C.itemName(o.tower)} — it is bought`);
       if (!hasBuilding(state, 'workshop')) return no('needs a manned Workshop');
       return holdFree(state) > 0 ? ok : no('the hold is full');
     },
@@ -730,7 +742,7 @@ export function projectedAssignments(state) {
         break;
       case 'reassign': {
         const gone = drop(o.assignmentId);
-        if (gone && o.kind !== 'idle') {
+        if (gone) {
           out.push({
             id: o.id, kind: o.kind, who: gone.who, queued: true,
             target: o.kind === 'man' ? o.targetId : o.target,
@@ -738,9 +750,6 @@ export function projectedAssignments(state) {
         }
         break;
       }
-      case 'unassign':
-        drop(o.assignmentId);
-        break;
       case 'scheduleAssault':
         if (o.leader) out.push({ id: o.id, kind: 'assault', who: o.leader, target: o.spawnerId, queued: true });
         break;
@@ -790,11 +799,6 @@ export function projectedCrew(state, held) {
   };
 
   for (const o of state.orders) {
-    if (o.type === 'unassign' || (o.type === 'reassign' && o.kind === 'idle')) {
-      const a = state.crew.assignments.find((x) => x.id === o.assignmentId);
-      if (a) taken.delete(a.who);
-      continue;
-    }
     if (o.type === 'reassign') continue;            // the same body, a new job
     let at = null;
     if (o.type === 'assignClear' || o.type === 'assignGarrison' || o.type === 'workFeature') {
@@ -814,6 +818,32 @@ export function projectedCrew(state, held) {
     if (o.type === 'assignClear') faces.set(m.id, (faces.get(m.id) || 0) + 1);
   }
   return { byOrder, taken };
+}
+
+/**
+ * Every job once the queue has run, with each one named to the body that will
+ * actually do it — and everyone the queue has not spoken for.
+ *
+ * `projectedAssignments` carries an order's `who` verbatim, and for the common
+ * "put a hand on it" order that is the literal string `hand`: nobody. So a
+ * panel that asked it who was busy learned nothing about the hands the queue
+ * was about to take, and listed all of them as standing about — five free in
+ * the crew panel against the bar's one spare, with four of the five named
+ * against orders in the queue beside it. `projectedCrew` already works out
+ * which body each order takes, in the same order and by the same rule as the
+ * resolve; this is that answer folded back into the roster, so the table and
+ * the count come off one list and cannot disagree.
+ *
+ * An order with nobody left to take it keeps its `hand`, which is the honest
+ * answer and matches no member.
+ */
+export function projectedRoster(state) {
+  const { byOrder } = projectedCrew(state, crewGroundAtResolve(state));
+  const tasks = projectedAssignments(state).map((a) => {
+    const body = a.queued ? byOrder.get(a.id) : a.who;
+    return body && body !== a.who ? { ...a, who: body } : a;
+  });
+  return { tasks, busy: new Set(tasks.map((a) => a.who)) };
 }
 
 /** Officers with nothing to do once the queue has run. */
@@ -864,7 +894,8 @@ export function projectedItems(state) {
     switch (o.type) {
       case 'buyItem': case 'craftItem': hold.push({ tower: o.tower, tier: 1 }); break;
       case 'buildTower':
-        if (C.TOWER_NEEDS_ITEM) take(o.towerIndex, lowest(o.towerIndex));
+        // the tier the order names, or the cheapest of its kind if it names none
+        if (C.TOWER_NEEDS_ITEM) take(o.towerIndex, o.tier ?? lowest(o.towerIndex));
         break;
       case 'mergeItems':
         take(o.tower, o.tier); take(o.tower, o.tier);
@@ -907,9 +938,16 @@ function checkAgainstQueue(state, order) {
       if (cur > 0 && order.tier <= cur) return no('not a higher tier');
       return ok;
     }
-    case 'buildTower':
+    case 'buildTower': {
       if (!C.TOWER_NEEDS_ITEM) return ok;
-      return lowest(order.towerIndex) ? ok : no(`needs a ${C.itemName(order.towerIndex)} in the hold`);
+      if (order.tier === undefined) {
+        return lowest(order.towerIndex) ? ok : no(`needs a ${C.itemName(order.towerIndex)} in the hold`);
+      }
+      // A named tier is a named item: two towers queued at tier 4 want two
+      // tier-4 fittings, and the second is refused if only one was ever held.
+      return has(order.towerIndex, order.tier)
+        ? ok : no(`no tier-${order.tier} ${C.itemName(order.towerIndex)} in the hold`);
+    }
     case 'disassembleTower': case 'evolve':
       return towerTier.has(order.towerId) ? ok : no('already queued for removal');
     case 'assignMan': {
@@ -931,11 +969,32 @@ function checkAgainstQueue(state, order) {
   }
 }
 
+/**
+ * Everything an order is asked except the ground it names: the queue, the
+ * stores, the hold, the bodies.
+ *
+ * Split out because a catalogue has no tile to offer. The gunnery shelf lists
+ * eight towers before the player has picked anywhere to put one, and the only
+ * honest thing a row can grey itself out for at that point is a price it cannot
+ * meet or a fitting it does not hold. Whether *this* hex will take it is
+ * answered by the outline that follows the cursor afterwards.
+ */
+export function canOrderAnywhere(state, order) {
+  const def = ORDERS[order.type];
+  if (!def) return no('no such order');
+  return checkResources(state, order);
+}
+
 export function canEnqueue(state, order) {
   const def = ORDERS[order.type];
   if (!def) return no('no such order');
   const check = def.check(state, order);
   if (!check.ok) return check;
+  return checkResources(state, order);
+}
+
+function checkResources(state, order) {
+  const def = ORDERS[order.type];
   const queued = checkAgainstQueue(state, order);
   if (!queued.ok) return queued;
   const cost = def.cost(state, order) || NO_COST;
@@ -983,6 +1042,101 @@ export function enqueue(state, order) {
 export function revoke(state, id) {
   const i = state.orders.findIndex((o) => o.id === id);
   if (i >= 0) state.orders.splice(i, 1);
+}
+
+// ---- standing down ---------------------------------------------------------
+// The other thing that is not an order. The queue exists to hold back what
+// changes the world, so that any of it can be taken back before the turn ends;
+// taking a worker off a job changes nothing out there at all. It moves nobody —
+// they go on standing exactly where the job left them — it costs nothing, and
+// there is no state of the world in which it can fail.
+//
+// Queued, it was three separate pieces of make-believe: `handFreed` crediting a
+// hand back to `projectedHands`, a case in `projectedAssignments` that dropped
+// the row again, and a branch in `projectedCrew` that un-took the body. Each
+// one existed to describe a release that had not happened yet, and each was a
+// place the panels could disagree with the resolve about who was free. Doing it
+// now instead deletes all three, and the answer they were approximating — the
+// body is loose, put them somewhere else this phase — is simply the truth.
+//
+// And because nobody walks, the release is its own undo: a worker stood down
+// off a house is still standing on the house, so manning it again is a job with
+// no walk in it (see `jobPlace`).
+
+/** Take a worker off their job, now. */
+export function standDown(state, assignmentId) {
+  const a = state.crew.assignments.find((x) => x.id === assignmentId);
+  if (!a) return no('gone');
+  // The one job that cannot be called off: the team is away over the island
+  // with the powder, and there is nobody here to stand down.
+  if (a.kind === 'assault') return no('away on a sabotage mission');
+  dropAssignment(state, a.id);
+  recomputeCapBonus(state);
+  addLog(state, `${crewName(state, a.who)} stands down`);
+  return ok;
+}
+
+// ---- the counter -----------------------------------------------------------
+// The other one, and for the same reason. Goods over a counter are handed
+// across and paid for on the spot: there is nothing in a trade for a resolve to
+// carry out, so making it wait for one would only be a rule about waiting. It
+// costs no turn and no body.
+//
+// It lives in this file and not in build.js because the hard half is the queue.
+// The stores in the bar are already spent down by everything queued against
+// them, and selling wood a queued Workshop is counting on would leave the
+// resolve unable to pay for its own order — so what is on the counter is
+// `projectedRes`, not `state.res`.
+
+/** What a trade of `amount` comes to, in whole gold. `null` for goods the dock does not deal in. */
+export function tradeQuote(state, res, dir, amount) {
+  if (!C.TRADE[res]) return null;
+  const n = Math.floor(Number(amount));
+  if (!Number.isFinite(n)) return null;
+  return { res, dir, amount: n, gold: dir === 'sell' ? C.tradeSell(res, n) : C.tradeBuy(res, n) };
+}
+
+/** The most of a good there is to sell: what the queue has not already spent. */
+export function tradeMost(state, res) {
+  return Math.max(0, Math.floor(projectedRes(state)[res] || 0));
+}
+
+export function canTrade(state, { res, dir, amount }) {
+  if (!C.TRADE[res]) return no('the dock does not deal in that');
+  if (dir !== 'sell' && dir !== 'buy') return no('sold or bought, nothing else');
+  if (!hasBuilding(state, 'dock')) return no('needs a manned Trading Dock');
+  const n = Number(amount);
+  if (!Number.isInteger(n) || n <= 0) return no('a whole amount, one or more');
+  const have = projectedRes(state);
+  const q = tradeQuote(state, res, dir, n);
+  if (dir === 'sell') {
+    if ((have[res] || 0) < n) return no(`only ${Math.max(0, have[res] || 0)} ${res} free of the queue`);
+    // Whole gold, and the dock does not round up for you: a handful of wood is
+    // not worth a coin, and saying so is better than taking it for nothing.
+    if (q.gold < 1) return no(`${n} ${res} is not worth a whole gold`);
+  } else if (have.gold < q.gold) {
+    return no(`needs ${q.gold} gold`);
+  }
+  return ok;
+}
+
+/** Strike the trade. Instant: the stores move now, and nothing is queued. */
+export function trade(state, order) {
+  const check = canTrade(state, order);
+  if (!check.ok) return check;
+  const { res, dir } = order;
+  const q = tradeQuote(state, res, dir, Number(order.amount));
+  if (dir === 'sell') {
+    state.res[res] -= q.amount;
+    state.res.gold += q.gold;
+    state.stats.goldEarned += q.gold;
+    addLog(state, `${q.amount} ${res} goes over the dock's counter for ${q.gold} gold`);
+  } else {
+    state.res.gold -= q.gold;
+    state.res[res] += q.amount;
+    addLog(state, `${q.gold} gold over the dock's counter buys ${q.amount} ${res}`);
+  }
+  return { ...ok, gold: q.gold, amount: q.amount };
 }
 
 export const describe = (state, order) => ORDERS[order.type].label(order, state);

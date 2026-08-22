@@ -7,6 +7,7 @@ index.html
 style.css
 src/
   main.js              entry: builds state, wires view to sim, starts the loop
+  save.js              the run in localStorage, across reloads
   sim/
     config.js          00-constants.md as one frozen object
     rng.js             mulberry32, seeded
@@ -37,6 +38,22 @@ No other files. No `node_modules`.
 `Math.random`, `Date.now`, or `new Date()`. Every random draw goes through
 `rng.js`. Given the same seed and the same order sequence, a run replays
 identically.
+
+**`save.js` is browser glue** and sits beside `main.js` rather than under either
+half: it reads the clock (for the opening seed) and `localStorage`, and `sim/`
+may do neither. It writes two keys, because the map is 850 KB and changes once a
+turn while everything else is 3 KB and changes on every click:
+
+| key | holds | written |
+|---|---|---|
+| `salt-n-chitin/map` | seed, `map.version`, the tiles as entries | when `map.version` changes |
+| `salt-n-chitin/run` | the rest of the state | whenever anything moves |
+
+Only a player-phase state is written, so a reload during a resolve comes back to
+the top of that turn with its queue and plays it again. **`state.derived` is
+never saved:** it is the map's cached views, held as `Set`s and keyed on
+`map.version`, and JSON turns a Set into `{}` — a cache that survives a reload
+can only be wrong.
 
 **`view/` never mutates sim state.** It reads it and it pushes orders onto the
 queue. One direction, always.

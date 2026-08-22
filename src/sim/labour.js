@@ -118,15 +118,26 @@ export function recruitPirate(state, events, at = null) {
 
 // ---- movement --------------------------------------------------------------
 
-/** Where a job actually stands on the map, or null for one that has no place. */
-export function jobPlace(state, assignment) {
+/**
+ * Where a job actually stands on the map, or null for one that has no place.
+ *
+ * A house is the whole of its ground, not the corner its record happens to
+ * name. Given the body who is doing the job, a worker already standing anywhere
+ * on the footprint mans it from where they stand: no walk, and no walk to be
+ * refused. Asked without a body — by the panels, which want one place to point
+ * at — it is the anchor tile as before.
+ */
+export function jobPlace(state, assignment, from = null) {
   const t = assignment.target;
   if (!t) return null;
   if (t.q !== undefined) return { q: t.q, r: t.r };
   if (assignment.kind === 'man') {
     const s = state.towers.find((x) => x.id === t) || state.buildings.find((x) => x.id === t);
     if (!s) return null;
-    return s.q !== undefined ? { q: s.q, r: s.r } : { q: s.tiles[0].q, r: s.tiles[0].r };
+    const foot = s.footprint || s.tiles || [];
+    const here = from && foot.find((p) => p.q === from.q && p.r === from.r);
+    if (here) return { q: here.q, r: here.r };
+    return s.q !== undefined ? { q: s.q, r: s.r } : { q: foot[0].q, r: foot[0].r };
   }
   return null;
 }
@@ -253,7 +264,7 @@ export function runMovement(state, events) {
   let moved = 0;
   for (const a of state.crew.assignments) {
     const m = memberById(state, a.who);
-    const to = jobPlace(state, a);
+    const to = jobPlace(state, a, m);
     if (!m || !to) continue;
     if (arrived(state, a)) {
       if (m.q !== to.q || m.r !== to.r) { m.q = to.q; m.r = to.r; moved++; }
@@ -459,7 +470,10 @@ export function assign(state, { kind, who, target, at, sameTripAs, held }) {
   let turns = 0;
   if (sameTripAs !== undefined) turns = sameTripAs;
   else if (at) {
-    const route = crewRoute(state, m, at, held);
+    // `at` is where the caller pointed; where *this* body goes is asked again
+    // once the body is known, because a house is manned from whichever of its
+    // tiles the worker is already on.
+    const route = crewRoute(state, m, jobPlace(state, { kind, target }, m) || at, held);
     if (!route.reachable) return null;
     turns = C.travelTurns(route.cost);
   }

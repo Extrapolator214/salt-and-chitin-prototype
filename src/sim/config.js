@@ -136,12 +136,22 @@ const C = {
   // shape of the supply line is a decision rather than a starting condition.
   LANDING_BEACH_SPAN: 5,   // how far along the shore the landing beach reaches
   LANDING_BEACH_DEPTH: 2,  // and how far back from the waterline it runs
-  // ...and it stays on the ship's seaward side. Sand can never be cut, so sand
-  // laid across the landward face would wall the ship in against its own road
-  // for good — the beach is the ground between the ship and the water, and the
-  // way inland is ordinary island the player has to cut.
+  // ...and the wide cove beach stays on the ship's seaward side: it is the
+  // ground between the ship and the water, and the way inland is ordinary
+  // island the player has to cut. It used to have to stay seaward on pain of
+  // walling the ship in, because sand can never be cut and the network was
+  // road-only; the network is open ground now, so sand joins rather than
+  // blocks, and the apron below rings the ship on every side.
   LANDING_BEACH_ARC: 90,
-  LANDING_EXITS_MIN: 3,    // clearable faces the ship must have, or reroll
+  // The apron: one tile of sand all the way round the ship's standing, so a
+  // hand can walk out of the hull in any direction and nothing — cliff, wood,
+  // rock or stream — is ever jammed against the hull itself. It sits outside
+  // the terrain mix like every other beach.
+  LANDING_APRON: 1,
+  // Cuttable ground the apron must touch, or the island is rerolled. Measured
+  // at the apron's edge rather than against the hull: the ship no longer needs
+  // a face it can cut, only somewhere to cut once the crew are off the sand.
+  LANDING_EXITS_MIN: 3,
   // Sand is where a boat can be run aground, not the whole shoreline. A few
   // more beaches sit round the rim; everywhere else the island grows down to
   // the water, so most of the coast is ground you have to cut.
@@ -176,8 +186,11 @@ const C = {
   // cutting anything, because sand can never be cut. Sand no longer rings the
   // island, so this buys you the landing cove and the few beaches on the rim
   // and nothing else — the rest of the coast is ground you cut your way into.
-  // No road will ever run over sand either, so a beach walk never becomes a
-  // supply line, and an assault still needs a real road.
+  //
+  // This list is also the enemy's road in. Open ground joined to the ship is
+  // one network — see `shipNetwork` — so a run of beach or meadow is a supply
+  // line the island handed you and a lane the cohorts march up, both at once.
+  // No road ever runs *over* sand, but a walk along it counts.
   // The meadow is here for the same reason the beach is: there is nothing on it
   // to cut, so a chest lying in one has to be reachable without cutting.
   WORK_OPEN_TERRAIN: ['road', 'sand', 'salt', 'meadow'],
@@ -262,6 +275,8 @@ const C = {
   // [cal] — the ship used to cover a twelve-tile bubble, which made the guns
   // decoration. It holds its own landing and no more.
   SHIP_RANGE: 6,
+  // The ship's own shot, which is not a tower's and should not read as one.
+  SHIP_SHOT_COLOUR: '#dfe6f2',
   REPAIR_WOOD_PER_HULL: 25,
   HOLD_SLOTS: 5,
 
@@ -269,7 +284,14 @@ const C = {
   TIER_BASE: 2.5,
   EVOLVED_MULT: 2.5,
   TOWER_MANNING: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, evolved: 3 },
-  TOWER_FOOTPRINT: { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, evolved: 3 },
+  // A tower's ground is a property of the gun, not of the tier: the yard a
+  // Culverin Battery needs is the yard it needs on the day it is raised, and a
+  // better fitting dropped in later is a better gun in the same emplacement.
+  // Tiering used to grow the footprint, which meant a tower could be refused a
+  // fitting it had the wood for because the ground beside it had since filled
+  // in — a rule the player could neither see coming nor plan around. Each
+  // tower's own `tiles` is now its shape for life, 1 to 3, laid out of
+  // BUILDING_SHAPES exactly as a yard's is.
   TOWER_COST: { wood: 30, stone: 20 },
   // v6: "A tower needs an item to be built" — the emplacement is wood and
   // stone, but the gun itself is a tier-1 fitting out of the hold. Set false to
@@ -282,17 +304,33 @@ const C = {
   // Ranges are deliberately short. A tower covers a corridor, so where the road
   // runs past it is a decision — and a Palisade is how you make the enemy take
   // the corridor you built.
+  //
+  // `source` is where the fitting comes from, and there is exactly one route to
+  // each. Iron fittings are ironwork — a barrel, a bore, a length of chain —
+  // and a Workshop makes them out of iron. Everything else is a living thing or
+  // a keg of powder: nobody on the crew makes those, they are bought off the
+  // Peculiar Merchant for gold and cannot be made at any price.
   TOWERS: [
-    { i: 0, name: 'Swivel Gun Post', shelf: 'gunnery', range: 2, shape: 'single', essence: 'Scatter', fire: 'fast single target', colour: '#c8b45a', item: 'Swivel Gun', itemShort: 'Swivel' },
-    { i: 1, name: 'Culverin Battery', shelf: 'gunnery', range: 4, shape: 'single', essence: 'Bore', fire: 'slow single target', colour: '#b9743f', item: 'Culverin', itemShort: 'Culverin' },
-    { i: 2, name: 'Chain-Shot Gallery', shelf: 'gunnery', range: 3, shape: 'file', essence: 'Rake', fire: 'pierces a file along the road', colour: '#a85c5c', item: 'Chain-Shot', itemShort: 'Chain-Shot' },
-    { i: 3, name: 'Dynamite Throwers', shelf: 'gunnery', range: 3, shape: 'blast', essence: 'Blast', fire: 'slow blast, radius 1', colour: '#d0603a', item: 'Powder Charge', itemShort: 'Charge' },
-    { i: 4, name: 'Parrot Swarm Aviary', shelf: 'beasts', range: 3, shape: 'multi', essence: 'Swarm', fire: 'many weak hits, up to 4 targets', colour: '#4fae7a', item: 'Parrot Cage', itemShort: 'Parrots' },
-    { i: 5, name: 'Alligator Guards', shelf: 'beasts', range: 1, shape: 'single', essence: 'Snag', fire: 'holds what it hits in place', colour: '#5e8a3a', item: 'Alligator Egg', itemShort: 'Gator Egg' },
-    { i: 6, name: 'Krakenling Well', shelf: 'beasts', range: 1, shape: 'adjacent', essence: 'Sweep', fire: 'hits every adjacent road tile', colour: '#5a7fae', item: 'Krakenling Spawn', itemShort: 'Krakenling' },
-    { i: 7, name: 'Monkey Riggers', shelf: 'beasts', range: 2, shape: 'single', essence: 'Plunder', fire: 'yields 2 gold per kill', colour: '#b58b4a', item: 'Monkey Troop', itemShort: 'Monkeys' },
+    { i: 0, name: 'Swivel Gun Post', shelf: 'gunnery', range: 2, shape: 'single', tiles: 1, rate: 'fast', essence: 'Scatter', fire: 'fast single target', colour: '#c8b45a', item: 'Swivel Gun', itemShort: 'Swivel', source: 'iron' },
+    { i: 1, name: 'Culverin Battery', shelf: 'gunnery', range: 4, shape: 'single', tiles: 2, rate: 'slow', essence: 'Bore', fire: 'slow single target', colour: '#b9743f', item: 'Culverin', itemShort: 'Culverin', source: 'iron' },
+    { i: 2, name: 'Chain-Shot Gallery', shelf: 'gunnery', range: 3, shape: 'file', tiles: 2, rate: 'normal', essence: 'Rake', fire: 'pierces a file along the road', colour: '#a85c5c', item: 'Chain-Shot', itemShort: 'Chain-Shot', source: 'iron' },
+    { i: 3, name: 'Dynamite Throwers', shelf: 'gunnery', range: 3, shape: 'blast', tiles: 2, rate: 'slow', essence: 'Blast', fire: 'slow blast, radius 1', colour: '#d0603a', item: 'Powder Charge', itemShort: 'Charge', source: 'gold' },
+    { i: 4, name: 'Parrot Swarm Aviary', shelf: 'beasts', range: 3, shape: 'multi', tiles: 3, rate: 'fast', essence: 'Swarm', fire: 'many weak hits, up to 4 targets', colour: '#4fae7a', item: 'Parrot Cage', itemShort: 'Parrots', source: 'gold' },
+    { i: 5, name: 'Alligator Guards', shelf: 'beasts', range: 1, shape: 'single', tiles: 2, rate: 'normal', essence: 'Snag', fire: 'holds what it hits in place', colour: '#5e8a3a', item: 'Alligator Egg', itemShort: 'Gator Egg', source: 'gold' },
+    { i: 6, name: 'Krakenling Well', shelf: 'beasts', range: 1, shape: 'adjacent', tiles: 1, rate: 'normal', essence: 'Sweep', fire: 'hits every adjacent road tile', colour: '#5a7fae', item: 'Krakenling Spawn', itemShort: 'Krakenling', source: 'gold' },
+    { i: 7, name: 'Monkey Riggers', shelf: 'beasts', range: 2, shape: 'single', tiles: 1, rate: 'normal', essence: 'Plunder', fire: 'yields 2 gold per kill', colour: '#b58b4a', item: 'Monkey Troop', itemShort: 'Monkeys', source: 'gold' },
   ],
   BLAST_RADIUS: 1,
+  // Shot on the map. A gun's damage is a rate, applied every tick — what the
+  // player sees has to be a discrete thing leaving the barrel or the fight
+  // reads as eight towers pointing at the swarm. So the gun keeps its rate and
+  // throws a round on its own cadence: the projectile is the telling, not the
+  // arithmetic, and nothing about where it is changes what anything takes.
+  SHOT_INTERVAL: { fast: 0.16, normal: 0.42, slow: 0.85 },
+  PROJECTILE_SPEED: 11,   // tiles a second, so a 4-tile shot is in the air ~0.36 s
+  PROJECTILE_MAX: 300,    // a ceiling for a fight run out with nobody watching
+  IMPACT_SECONDS: 0.18,
+  SHIP_SHOT_RATE: 'normal',
   FILE_LENGTH: 3, // target tile plus the two behind it
   MULTI_TARGETS: 4,
   PLUNDER_GOLD_PER_KILL: 2,
@@ -300,9 +338,32 @@ const C = {
   EVOLUTION_MOD: 20,
 
   // 8 · Items
+  // Neither price is a shop you carry with you. A fitting is crafted at a
+  // Workshop or bought off a Peculiar Merchant, and which of the two is a
+  // property of the fitting (see `source` above), not a choice: the hold is
+  // filled by putting up the house that fills it.
   ITEM_CRAFT_IRON: 6,
   ITEM_BUY_GOLD: 8,
   WEAPONS_MASTER_DISCOUNT: 0.25,
+
+  // 8b · The Trading Dock's counter
+  // The dock's standing trade turns the surplus into gold a lot at a time and
+  // asks nobody. The counter is the other half of it: goods bought and sold to
+  // order, in whatever quantity, struck on the spot. It is not labour, so it
+  // does not go through the queue and does not wait for a turn to resolve.
+  //
+  // `per` is the lot the prices are quoted against, `sell` what the dock pays
+  // for one and `buy` what it asks. The spread is 2x throughout, and the wood
+  // and stone sell price is DOCK_INPUT for DOCK_GOLD_OUT — the counter pays
+  // exactly what the dock's own trade does, so selling by hand is a matter of
+  // timing rather than a better rate. Iron is dear on both sides: it is a turn
+  // of the Forge's work, not a heap on the beach.
+  TRADE_GOODS: ['wood', 'stone', 'iron'],
+  TRADE: {
+    wood: { per: 12, sell: 1, buy: 2 },
+    stone: { per: 12, sell: 1, buy: 2 },
+    iron: { per: 1, sell: 1, buy: 2 },
+  },
 
   // 9 · Economic buildings
   BUILDING_COST: { wood: 120, stone: 80 },
@@ -329,8 +390,15 @@ const C = {
   BUILDINGS: [
     { type: 'warehouse', name: 'Warehouse', tiles: 5, cost: { wood: 150, stone: 100 }, owns: 'inventory', effect: 'the hold becomes unlimited', repeatable: false },
     { type: 'forge', name: 'Forge', tiles: 4, cost: { wood: 110, stone: 70 }, owns: 'iron', effect: '3 stone -> 1 iron per turn', repeatable: false },
-    { type: 'workshop', name: 'Workshop', tiles: 5, cost: { wood: 150, stone: 100 }, owns: 'crafting', effect: 'items craftable at 6 iron', repeatable: false },
-    { type: 'dock', name: 'Trading Dock', tiles: 5, cost: { wood: 140, stone: 90 }, owns: 'the surplus', effect: '12 wood or stone -> 1 gold per turn', repeatable: false },
+    { type: 'workshop', name: 'Workshop', tiles: 5, cost: { wood: 150, stone: 100 }, owns: 'ironwork', effect: 'iron fittings craftable at 6 iron', repeatable: false },
+    { type: 'dock', name: 'Trading Dock', tiles: 5, cost: { wood: 140, stone: 90 }, owns: 'the surplus', effect: '12 wood or stone -> 1 gold per turn, and a counter to trade over', repeatable: false },
+    // The other half of the hold. Five of the eight fittings are things no crew
+    // makes — powder, birds, eggs, spawn, monkeys — and this is the only door
+    // they come through. Cheap, small, and the one yard on the shelf that runs
+    // on a single hand: it gates every gun of its shelf, and a gate that costs
+    // a fifth of the company to open is a gate nobody opens in time. The
+    // merchant keeps his own counter; the hand is there to carry.
+    { type: 'merchant', name: 'Peculiar Merchant', tiles: 3, crew: 1, cost: { wood: 90, stone: 60 }, owns: 'oddities', effect: 'gold fittings can be bought at 8 gold; runs on one hand', repeatable: false },
     { type: 'tinker', name: "Tinker's Shed", tiles: 4, cost: { wood: 130, stone: 90 }, owns: 'evolution', effect: 'evolutions become possible', repeatable: false },
     { type: 'sappers', name: "Sappers' Camp", tiles: 6, cost: { wood: 380, stone: 260 }, owns: 'offence', effect: 'sabotage teams can be raised', repeatable: false },
     { type: 'hospital', name: 'Hospital', tiles: 3, cost: { wood: 90, stone: 60 }, owns: 'downtime', effect: 'sabotage downtime 3 -> 1 turn', repeatable: false },
@@ -458,7 +526,7 @@ const C = {
   FEATURE_MIN_APART: 6,
   CACHE_DIST: [6, 58],   // from the base, across a 2 x ISLAND_RADIUS island
   CACHE_NEAR: [5, 11],   // the first few sit within reach of the landing
-  CACHE_NEAR_COUNT: 3,   // ...and gold is the only thing that buys a gun
+  CACHE_NEAR_COUNT: 3,   // ...and gold buys a gun before a Workshop stands
 
   // 13 · Officers
   // Four sail with the run. A fifth is found on the island: a random pirate,
@@ -515,7 +583,12 @@ C.power = (tier, evolved) => {
   return evolved ? base * C.EVOLVED_MULT : base;
 };
 C.manningFor = (tier, evolved) => (evolved ? C.TOWER_MANNING.evolved : C.TOWER_MANNING[tier]);
-C.footprintFor = (tier, evolved) => (evolved ? C.TOWER_FOOTPRINT.evolved : C.TOWER_FOOTPRINT[tier]);
+/** How much ground a tower of this kind stands on — the same at every tier. */
+C.footprintFor = (towerIndex) => (C.TOWERS[towerIndex] ? C.TOWERS[towerIndex].tiles : 1);
+/** Its fixed shape laid on the map at (q, r), out of the same table a yard uses. */
+C.towerTiles = (towerIndex, q, r) => C.buildingTiles(C.footprintFor(towerIndex), q, r);
+/** Seconds between rounds leaving this gun. Visual cadence only. */
+C.shotInterval = (rate) => C.SHOT_INTERVAL[rate] || C.SHOT_INTERVAL.normal;
 C.actOf = (turn) => Math.min(C.ACTS, Math.floor((turn - 1) / C.TURNS_PER_ACT) + 1);
 /** Turns of walking before work begins; the arrival turn is itself a work turn. */
 C.travelTurns = (dist) => C.TRAVEL.find((t) => dist <= t.within).turns;
@@ -528,11 +601,25 @@ C.buildingDef = (type) => C.BUILDINGS.find((b) => b.type === type);
 C.buildingShape = (n) => C.BUILDING_SHAPES[n] || C.BUILDING_SHAPES[1];
 /** That shape laid on the map at (q, r). */
 C.buildingTiles = (n, q, r) => C.buildingShape(n).map(([dq, dr]) => ({ q: q + dq, r: r + dr }));
+/**
+ * How far a building's effect reaches from the ground it stands on, or 0 for
+ * one that only works where it is. Only the Bunkhouse has a reach, and the
+ * radius lives in one place — here it is read back by name rather than copied
+ * into the definition, which cannot refer to the table it sits in.
+ */
+C.buildingRadius = (type) => (type === 'bunkhouse' ? C.BUNKHOUSE_RADIUS : 0);
 /** What this building costs, falling back to the spec's flat price. */
 C.buildingCost = (type) => (C.buildingDef(type) || {}).cost || C.BUILDING_COST;
 /** The verb for working a point of interest, or null if it is not worked at all. */
 C.featureAction = (kind) => (C.FEATURES[kind] ? C.FEATURES[kind].action || null : null);
 // Each tower takes its own fitting; they are not interchangeable.
+/** 'iron' — crafted at a Workshop. 'gold' — bought off a Peculiar Merchant. */
+C.itemSource = (i) => (C.TOWERS[i] ? C.TOWERS[i].source : 'gold');
+/** The building that is the only route to this fitting. */
+C.itemHouse = (i) => (C.itemSource(i) === 'iron' ? 'workshop' : 'merchant');
+/** Gold the dock pays for `n` of a good, and gold it asks for the same. Whole gold both ways. */
+C.tradeSell = (res, n) => (C.TRADE[res] ? Math.floor((n * C.TRADE[res].sell) / C.TRADE[res].per) : 0);
+C.tradeBuy = (res, n) => (C.TRADE[res] ? Math.ceil((n * C.TRADE[res].buy) / C.TRADE[res].per) : Infinity);
 C.itemName = (i) => (C.TOWERS[i] ? (C.TOWERS[i].item || `${C.TOWERS[i].name} fitting`) : 'fitting');
 C.itemShort = (i) => (C.TOWERS[i] ? (C.TOWERS[i].itemShort || C.itemName(i)) : 'fitting');
 

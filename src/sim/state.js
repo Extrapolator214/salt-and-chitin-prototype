@@ -261,30 +261,42 @@ const cacheFor = (state, name) => {
   return (state.derived[name] = state.derived[name] || { version: -1, value: null });
 };
 
-/** Road tiles connected to the base through road or bridge. */
-export function roadNetwork(state) {
+/**
+ * Everything joined to the ship over open ground: its own standing, the road
+ * the player has cut, the bridges, and the sand, salt and meadow that were
+ * already open when you landed.
+ *
+ * One network, not two. It used to be road-and-bridge only, on the reasoning
+ * that a beach walk should never become a supply line — but that made every
+ * terrain a hand can walk and can never cut into a permanent hole in the map's
+ * connectivity, and a ship sitting on its own apron of sand was a ship sealed
+ * off from every road it would ever cut. Open ground is open ground: the crew
+ * walk it, the cohorts march down it, and a building goes up beside it.
+ *
+ * What is excluded is what nothing walks: standing wood and rock, cliff, water,
+ * the spawners' own mounds, and the one thing the crew built not to be walked
+ * through — a palisade.
+ */
+export function shipNetwork(state) {
   const cache = cacheFor(state, 'net');
   if (cache.version === state.map.version) return cache.value;
   const set = new Set();
-  // The ship's own standing is the root of the network. It is beach, not road —
-  // no road is generated anywhere — so seeding from every tile it covers is what
-  // lets the first road the player cuts anywhere along its side join up.
+  // Seeded on every tile the ship covers, not just the one the base is pinned
+  // to, so the network is rooted in the whole of the standing.
   const seeds = (state.island?.footprint ?? [{ q: state.base.q, r: state.base.r }])
     .map((p) => tileAt(state, p.q, p.r)).filter(Boolean);
-  if (seeds.length) {
-    const queue = [...seeds];
-    for (const t of seeds) set.add(key(t.q, t.r));
-    while (queue.length) {
-      const cur = queue.pop();
-      for (const n of neighbours(cur.q, cur.r)) {
-        const k = key(n.q, n.r);
-        if (set.has(k)) continue;
-        const t = state.map.tiles.get(k);
-        if (!isRoad(t)) continue;
-        if (t.occupant && t.occupant.kind === 'spawner') continue;
-        set.add(k);
-        queue.push(t);
-      }
+  const queue = [...seeds];
+  for (const t of seeds) set.add(key(t.q, t.r));
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    for (const n of neighbours(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (set.has(k)) continue;
+      const t = state.map.tiles.get(k);
+      if (!isCrewGround(state, t)) continue;
+      set.add(k);
+      queue.push(t);
     }
   }
   cache.version = state.map.version;
@@ -312,9 +324,11 @@ export function blocksCrew(state, tile) {
  *
  * A spawner's mound is sand and reads as cleared, so on terrain alone the reach
  * flooded straight over a hive and offered work on the far side of it — ground
- * whose only join was across the enemy's own tiles. `roadNetwork` had always
- * excluded them; the exclusion simply never reached the walk. A palisade is
- * refused here for the same reason the walk refuses it.
+ * whose only join was across the enemy's own tiles. A palisade is refused for
+ * the same reason: a wall is a wall from both sides.
+ *
+ * This is the membership test for `shipNetwork`, so it settles the crew's walk
+ * and the cohorts' approach in one place.
  */
 export function isCrewGround(state, tile) {
   if (!isOpenGround(tile)) return false;
@@ -325,36 +339,16 @@ export function isCrewGround(state, tile) {
 /**
  * Everywhere a worker can get to from the ship over open ground.
  *
- * Standing forest is not a road. A hand cuts its way in, so the ground you can
+ * Standing forest is not walked. A hand cuts its way in, so the ground you can
  * put someone to work on is the fringe of what you have already opened — which
  * is what keeps the cleared blob a single growing thing rather than letting
  * work start anywhere on the island.
+ *
+ * The same set the cohorts march down: the crew's walk and the enemy's approach
+ * ask one question of the map, so they are one function and one cache. This is
+ * the name the labour side reads it under.
  */
-export function walkableFromBase(state) {
-  const cache = cacheFor(state, 'walk');
-  if (cache.version === state.map.version) return cache.value;
-  const set = new Set();
-  const start = tileAt(state, state.base.q, state.base.r);
-  if (start) {
-    set.add(key(start.q, start.r));
-    const queue = [start];
-    let head = 0;
-    while (head < queue.length) {
-      const cur = queue[head++];
-      for (const n of neighbours(cur.q, cur.r)) {
-        const k = key(n.q, n.r);
-        if (set.has(k)) continue;
-        const t = state.map.tiles.get(k);
-        if (!isCrewGround(state, t)) continue;
-        set.add(k);
-        queue.push(t);
-      }
-    }
-  }
-  cache.version = state.map.version;
-  cache.value = set;
-  return set;
-}
+export const walkableFromBase = shipNetwork;
 
 /**
  * The tiles the crew are holding: ground a body is standing on, and the face a
@@ -532,7 +526,11 @@ export function handsNeededFor(state, b) {
     (x) => x.type === 'bunkhouse' && x.complete && !x.ruined
       && x.tiles.some((bt) => b.tiles.some((t) => distance(bt, t) <= C.BUNKHOUSE_RADIUS)),
   );
-  const base = near ? C.BUILDING_HANDS_BUNKHOUSE : C.BUILDING_HANDS;
+  // A building's own `crew`, where it names one, and the shelf's price where it
+  // does not. A Bunkhouse takes a hand off whatever it reaches and can never
+  // put one on: a yard that already runs on one man runs on one man beside it.
+  const own = def && def.crew !== undefined ? def.crew : C.BUILDING_HANDS;
+  const base = near ? Math.min(own, C.BUILDING_HANDS_BUNKHOUSE) : own;
   return Math.max(0, base - (b.upgraded ? 1 : 0));
 }
 

@@ -86,8 +86,10 @@ export function renderHud(state, el) {
       row('seed', String(state.seed)),
       row('island', `<b>${census.land}</b> tiles`),
     ].join('   ')}<div class="census">${censusList(census)}</div></div>`
-    // Sits with the seed rather than down among the turn's buttons: starting a
-    // run is a thing you do to the whole run, and the seed it takes is read off
-    // the box it stands next to.
+    // Sit with the seed rather than down among the turn's buttons: starting a
+    // run is a thing you do to the whole run, and the seed both of them take is
+    // read off the box they stand next to. Restart is the same island again —
+    // the seed on the left of it — where New run is a different one.
+    + `<button id="restartmap" data-hud-action="restartMap">Restart map</button>`
     + `<button id="newrun" data-hud-action="newRun">New run</button>`;
 }
