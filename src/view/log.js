@@ -1,6 +1,10 @@
-// The event feed: the last 6 events, newest at the bottom.
+// The event feed: the newest events, at the bottom of a full-height strip.
 
-const LINES = 6;
+// Enough to fill the strip on any window worth playing on, rather than a count
+// chosen to look right at one height. The column is pinned to its own bottom
+// and clipped at the top, so a surplus costs a few hidden divs and a short one
+// would leave the top of the strip empty.
+const LINES = 80;
 
 /**
  * One element per line, because the feed is a flex column pinned to its own

@@ -141,6 +141,11 @@ html, body {
      background, and over open ground and forest they read as noise */
   color: #b3aea2;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.95);
+  /* The strip runs the whole height, so the oldest lines sit against the top
+     bar. Faded rather than cut: what is falling out of the feed should look
+     like it is going, not like the panel ends there. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 22%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 22%);
 }
 #log .l { padding: 1px 0; }
 #log .t { color: #736e64; margin-right: 2px; }
