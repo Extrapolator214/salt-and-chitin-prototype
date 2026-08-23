@@ -118,6 +118,10 @@ html, body {
   padding: 6px 10px; border-top: 1px solid var(--edge);
 }
 #actions .spacer { flex: 1; }
+/* Sits between the spacer and End Turn, so it is read on the way to the button
+   that starts the fight it describes. It gives way first when the bar is tight:
+   it is a standing reminder, and nothing is lost by it going. */
+#threatnote { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 6px; }
 
 /* The feed lives over the map's left edge rather than in a band of its own: it
    is glanced at, not read, and the map wants every pixel. Mostly transparent so
