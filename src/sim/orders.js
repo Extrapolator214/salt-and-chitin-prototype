@@ -510,16 +510,18 @@ export const ORDERS = {
   repairBuilding: {
     label: (o, state) => {
       const b = state.buildings.find((x) => x.id === o.buildingId);
-      return `rebuild ${b ? b.name : 'a ruin'}`;
+      if (!b) return 'rebuild a ruin';
+      return b.ruined ? `rebuild ${b.name}` : `repair ${b.name} — ${B.damagePoints(b)} points`;
     },
     cost: (state, o) => {
       const b = state.buildings.find((x) => x.id === o.buildingId);
-      return b ? B.rebuildCost(b.type) : {};
+      return b ? B.buildingRepairCost(b) : {};
     },
     check: (state, o) => B.canRepairBuilding(state, o.buildingId),
     apply: (state, o, events) => {
+      const ruin = state.buildings.find((x) => x.id === o.buildingId)?.ruined;
       const b = B.repairBuilding(state, o.buildingId);
-      events.push({ kind: 'rebuilt', what: b.name });
+      events.push({ kind: ruin ? 'rebuilt' : 'repaired', what: b.name });
     },
   },
 
@@ -963,6 +965,12 @@ function checkAgainstQueue(state, order) {
     }
     case 'upgradeCrew':
       return state.orders.some((o) => o.type === 'upgradeCrew' && o.buildingId === order.buildingId)
+        ? no('already queued') : ok;
+    // One repair puts the whole building back, so a second is a second price for
+    // nothing. The queue is where that is caught: the damage is still on the
+    // building until the turn ends, so the check alone would let it through.
+    case 'repairBuilding':
+      return state.orders.some((o) => o.type === 'repairBuilding' && o.buildingId === order.buildingId)
         ? no('already queued') : ok;
     default:
       return ok;

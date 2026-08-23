@@ -2254,6 +2254,36 @@ runSection('3.6c', () => {
     t('rebuilding puts it back on its feet at full strength',
       !b.ruined && b.hp === b.maxHp, `${Math.round(b.hp)}/${b.maxHp}`);
   }
+  {
+    // short of a ruin, the same offer at a share of the same price
+    const { s, b } = laneFixture();
+    runOut(s);
+    // A wave that stopped short of pulling it down. Set rather than played out,
+    // because the lane fixture has nothing shooting back and every fight in it
+    // runs all the way to a ruin — and a fraction of a point is left on it on
+    // purpose, since a real resolve never lands on a whole number.
+    b.ruined = false; b.complete = true; b.hp = b.maxHp * 0.65 + 0.4;
+    const gone = B.damagePoints(b);
+    const part = B.buildingRepairCost(b), whole = B.rebuildCost(b.type);
+    t('a knocked-about building is damaged but not a ruin',
+      !b.ruined && gone > 0 && b.hp > 0, `${Math.round(b.hp)}/${b.maxHp}, ${gone} gone`);
+    t('patching costs a share of the rebuild, by the share that is gone',
+      Object.entries(whole).every(([k, v]) => part[k] === Math.ceil(v * gone / b.maxHp))
+      && Object.values(part).every((v) => v > 0),
+      `${JSON.stringify(part)} of ${JSON.stringify(whole)} for ${gone}/${b.maxHp}`);
+    t('and the whole of it is what a ruin costs',
+      JSON.stringify(B.buildingRepairCost({ ...b, hp: 0, ruined: true })) === JSON.stringify(whole));
+    t('one repair per building at a time', O.enqueue(s, { type: 'repairBuilding', buildingId: b.id }).ok
+      && !O.enqueue(s, { type: 'repairBuilding', buildingId: b.id }).ok);
+    const before = { ...s.res };
+    playTurn(s, true);
+    const paid = Object.entries(part).every(([k, v]) => before[k] - s.res[k] >= v);
+    t('a repaired building is whole again, still working, and was paid for',
+      b.hp === b.maxHp && !b.ruined && b.complete && paid,
+      `${Math.round(b.hp)}/${b.maxHp}, complete ${b.complete}`);
+    t('and there is nothing left to repair',
+      !B.damagePoints(b) && !B.canRepairBuilding(s, b.id).ok, B.canRepairBuilding(s, b.id).why);
+  }
 });
 
 // ------------------------------------------------------------- 3.7 the full run

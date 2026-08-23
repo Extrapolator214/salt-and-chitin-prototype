@@ -278,6 +278,20 @@ const VIEWS = {
       return h;
     }
 
+    // Short of a ruin, the same offer at the same rate. It sits directly under
+    // the condition it acts on, above whatever else this house happens to be,
+    // because a knocked-about building is one hard turn from being a ruin and
+    // that is the thing to see first.
+    const gone = B.damagePoints(b);
+    if (gone > 0) {
+      const fix = { type: 'repairBuilding', buildingId: b.id };
+      const can = O.canEnqueue(state, fix);
+      h += `<h3>repair</h3><p class="note">${gone} of ${b.maxHp} points are gone. Putting them back costs ` +
+        `that share of a rebuild — ${costText(B.buildingRepairCost(b))}. It goes back to full, and it never ` +
+        `stops working meanwhile.</p>`;
+      h += btn('Repair', 'order', fix, !can.ok) + (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
+    }
+
     // The two houses that are also a shop. What they sell is not manning and not
     // a crew upgrade, so it goes at the top of the panel, above both.
     if (b.type === 'dock') {
@@ -1079,6 +1093,7 @@ export function summarise(events) {
         for (const r of e.ruined || []) out.push(`${r.name} was pulled down at (${r.q}, ${r.r}) — a ruin until it is rebuilt`);
         break;
       case 'rebuilt': out.push(`${e.what} is rebuilt out of its own ruin`); break;
+      case 'repaired': out.push(`${e.what} is patched up`); break;
       case 'spawnerDied': out.push(`the ${e.spawner} is destroyed`); break;
       case 'refused': out.push(`order refused — ${e.why}`); break;
       case 'feature':

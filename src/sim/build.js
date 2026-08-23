@@ -496,23 +496,53 @@ export function rebuildCost(type) {
   return out;
 }
 
+/**
+ * How much of a building is gone, in whole points — the number the panel shows
+ * beside its condition. Whole points because a fight leaves fractions behind,
+ * and half a point of damage is not a thing anyone should be asked to buy back.
+ */
+export const damagePoints = (b) =>
+  (b.ruined ? b.maxHp : Math.max(0, Math.floor(b.maxHp - b.hp)));
+
+/**
+ * What patching a building costs: a rebuild's price, scaled by the share of it
+ * that is gone. A ruin is the far end of that same line rather than a separate
+ * case — everything is missing, the share is 1, and the price is `rebuildCost`
+ * exactly. Nothing is rounded down to free: a scratch costs one of each.
+ */
+export function buildingRepairCost(b) {
+  const share = damagePoints(b) / b.maxHp;
+  const out = {};
+  for (const [k, v] of Object.entries(rebuildCost(b.type))) {
+    const n = Math.ceil(v * share);
+    if (n > 0) out[k] = n;
+  }
+  return out;
+}
+
 export function canRepairBuilding(state, id) {
   const b = state.buildings.find((x) => x.id === id);
   if (!b) return no('no such building');
-  if (!b.ruined) return no('not a ruin');
-  const cost = rebuildCost(b.type);
+  if (!damagePoints(b)) return no('nothing to repair');
+  const cost = buildingRepairCost(b);
   if (!canAfford(state, cost)) return no(`needs ${Object.entries(cost).map(([k, v]) => `${v} ${k}`).join(' + ')}`);
   return ok;
 }
 
-/** The queue has already paid `rebuildCost` by the time this runs. */
+/** The queue has already paid `buildingRepairCost` by the time this runs. */
 export function repairBuilding(state, id) {
   const b = state.buildings.find((x) => x.id === id);
+  const wasRuin = b.ruined;
   b.ruined = false;
   b.hp = b.maxHp;
-  b.complete = false; // it stands again at the end of the turn, like any build
+  // Only a ruin has to be stood up again; a building that was merely knocked
+  // about never stopped working, and taking its `complete` away would shut it
+  // for a turn as a reward for being repaired.
+  if (wasRuin) b.complete = false;
   touchMap(state);
-  addLog(state, `${b.name} is rebuilt out of its own ruin`);
+  addLog(state, wasRuin
+    ? `${b.name} is rebuilt out of its own ruin`
+    : `${b.name} is patched up`);
   return b;
 }
 
