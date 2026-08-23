@@ -75,8 +75,8 @@ export function renderHud(state, el) {
     col([
       row('turn', `<b>${state.turn}</b> / ${C.TURNS_PER_RUN}`),
       row('act', ROMAN[state.act]),
-    ])
-    + col(stores(state))
+    ], 'turn')
+    + col(stores(state), 'stores')
     + col([
       row('hull', `${hull}/${C.HULL_MAX}`, hullClass),
       row('power', totalPower(state).toFixed(1)),
