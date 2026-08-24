@@ -52,6 +52,7 @@ terrains are not simply tripled, and both are noted in the table.
 | `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **10 wood**, 3 turns — 10% more than forest |
 | `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: 3 wood, **1 turn** — a third of the wood for a third of the work |
 | `stone` | yes | 5 stone | yes | **no until cleared** | — | — | boulders span 3–5 tiles |
+| `iron` | yes | **15 iron** | yes | **no until cleared** | — | — | not in the spec's enum — a seam worked like a boulder, 2% of the mix. The only iron that is not smelted |
 | `road` | already clear | 0 | yes | yes | 1.0 | yes | what every cleared tile becomes |
 | `sand` | **no** | 0 | **no** | yes | 2.0 | yes | |
 | `meadow` | **no** | 0 | **yes, uncut** | yes | 1.5 | yes | open grass — crew walk it uncut, and a swarm in contact crosses it. The only ground built on without clearing first, and it never becomes road |
@@ -362,7 +363,7 @@ cohort advancing on that same turn. Its stars transfer to the surviving spawners
 
 | constant | value |
 |---|---|
-| `ESCALATION_TURNS` | 50 — one random spawner gains a star |
+| `ESCALATION_TURNS` | **25** — one random living spawner below its cap gains a star. The spec says 50; the build runs 25, which is 12 firings over a run against the 16 stars the two caps hold, so both can never fill |
 | `ACCUMULATE_TURNS` | 6 |
 | `ADVANCE_TILES_PER_TURN` | 6, divided by the mean advance multiplier of the tiles crossed |
 | `UNITS_PER_STAR` | 8 |
@@ -399,7 +400,7 @@ healing.
 | feature | count | effect |
 |---|---:|---|
 | treasure cache | 12 | 100 gold, worked by an Excavation Camp over 10 turns |
-| freshwater spring | 1 | +3 to `HANDS_CAP` while a hand stands on it |
+| freshwater spring | 1 | **3 more hands, ashore at the water**, once and for good. It was +3 to `HANDS_CAP` while a body stood on it — a rule from when hands were a number rather than named people, and one that asked a man to stand on a spring for the rest of the run to be allowed three more of him |
 | officer site | 1 | at ~0.5r, visible from turn 1; reaching it with a hand recruits a 4th officer |
 | shipwreck | 3 | 60 wood, 30 iron, 10 gold on first clear, then a buildable platform |
 

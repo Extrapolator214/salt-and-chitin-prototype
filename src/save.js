@@ -23,8 +23,9 @@ const PREFS_KEY = 'salt-n-chitin/prefs';
 // written under an older number rather than trying to translate it. 2 dropped
 // the `unassign` order, which standing down no longer queues — a run stored
 // mid-phase with one in its queue would have been resolved by a table that has
-// no entry for it.
-const VERSION = 2;
+// no entry for it. 3 dropped `assignGarrison` for the same reason: the spring
+// is worked now rather than held, so nothing stations anybody anywhere.
+const VERSION = 3;
 
 /** What was last written, so an unchanged map is not serialised again. */
 let written = { seed: null, version: -1 };

@@ -7,7 +7,7 @@ import {
   tileAt, towerRange, towerPower, towerManning, isBuildingManned, handsNeededFor,
   assignmentsFor, arrived, holdCap, holdFree, hasBuilding, idleHands, idleOfficers,
   buildingsOfType, isBuildable, officerById, handCount, crewName, isClearable, isOpenGround,
-  memberById, DEV_FLAGS, devFlag, autoClearOn,
+  memberById, DEV_FLAGS, devFlag, autoClearOn, handsCap,
 } from '../sim/state.js';
 import * as O from '../sim/orders.js';
 import { tileLabel } from '../sim/orders.js';
@@ -691,6 +691,62 @@ const VIEWS = {
     return h;
   },
 
+  /**
+   * A star. The one thing that happens to the enemy without the player doing
+   * anything, and it used to be a line in the turn report between "cleared 12
+   * tiles" and "a chest is dug up" — the same weight as a hand finishing a
+   * hedge. It is the clock of the whole run: waves get bigger linearly and
+   * tougher quadratically, and the turn a star lands is the turn the gun line
+   * you were happy with stopped being enough.
+   *
+   * This box is the act turning, and only that. An ordinary star is a pane on
+   * the reel — it closes itself, and skipping the reel skips it, which is what
+   * skipping is for. The act is the one moment whose rules change, so it waits
+   * to be dismissed and is shown whatever the reel is set to.
+   */
+  escalation(state, { events = [], turn = state.turn, report = true }) {
+    const stars = events.filter((e) => e.kind === 'escalation');
+    // The act turns on the turn *after* this resolve, so the star that lands on
+    // the last turn of an act is the one that announces the next.
+    const nextAct = C.actOf(turn + 1);
+    const turning = nextAct > C.actOf(turn) ? nextAct : 0;
+    const roman = (n) => 'I'.repeat(n);
+
+    let h = turning
+      ? `<h2>Act ${roman(turning)}</h2><p class="why">The island turns over. `
+        + `${C.FLARE_GATE[turning - 1]} flares are allowed from here, cumulative.</p>`
+      // Reachable only if something opens this box off an ordinary star; the
+      // resolve does not, but the heading should still be true if it did.
+      : '<h2>The enemy grows</h2>';
+
+    h += '<table><tr><th>spawner</th><th>stars</th><th>its cohorts</th><th>every unit</th><th></th></tr>';
+    for (const e of stars) {
+      const sp = state.spawners.find((x) => x.id === e.id);
+      const was = e.stars - 1;
+      const grown = (n) => 1 + C.UNIT_DANGER_SCALE * (n - 1) ** C.UNIT_DANGER_EXP;
+      const pairs = Math.max(0, e.stars - (C.SHIELD_STARS - 1));
+      h += row([
+        `<b>${esc(e.spawner)}</b>`,
+        `${was} <b>&rarr; ${e.stars}</b>${sp ? ` of ${sp.cap}` : ''}`,
+        `${was * C.UNITS_PER_STAR} <b>&rarr; ${e.stars * C.UNITS_PER_STAR}</b> units`,
+        `${grown(was).toFixed(2)}x <b>&rarr; ${grown(e.stars).toFixed(2)}x</b> hp and armour`,
+        '',
+      ]);
+      const notes = [];
+      notes.push('its next cohort carries an <b>elite</b>');
+      if (pairs > 0) notes.push(`<b>${pairs}</b> shield-and-healer pair${pairs === 1 ? '' : 's'} in every wave`);
+      h += `<tr><td></td><td colspan="4"><span class="note">${notes.join(' · ')}</span></td></tr>`;
+    }
+    h += '</table>';
+    h += `<p class="note">A star is more of them and bigger ones: numbers climb by `
+      + `${C.UNITS_PER_STAR} a star, hp and armour by the square of it. Killing a spawner does not `
+      + `spare you its stars — they pass to whatever is left standing.</p>`;
+    // With the reel off there is no report behind this one to hand over to, so
+    // the button says what it does.
+    h += `<p>${report ? btn('Go on', 'afterEscalation', {}) : btn('Close', 'close')}</p>`;
+    return h;
+  },
+
   /** Ending the turn while bodies stand about: who they are, and a way past. */
   idleWarning(state) {
     // The same register the crew panel reads, and for the same reason: this box
@@ -1118,11 +1174,6 @@ function tileJobs(state, t, at) {
   if (action) {
     jobs.push({ label: `${action} the ${featureWord(t.feature)}`, order: { type: 'workFeature', target: { q: at.q, r: at.r } } });
   }
-  // The spring is held, not worked: nobody finishes with it, and it pays only
-  // for as long as somebody is standing there.
-  if (open && t.feature === 'spring') {
-    jobs.push({ label: 'hold the spring', order: { type: 'assignGarrison', target: { q: at.q, r: at.r } } });
-  }
   return jobs;
 }
 
@@ -1142,14 +1193,12 @@ function featureNote(state, t) {
   const prize = featurePrize(kind);
   const action = C.featureAction(kind);
   const shut = isClearable(state, t);
-  const held = `It is held rather than worked: a body standing on it raises the hand cap by ${C.FEATURES.spring.handsCap}, and only for as long as they stand there.`;
-
   const where = (shut ? BURIED_PHRASE : OPEN_PHRASE)[kind]
     || (shut ? `A ${featureWord(kind)} lies under this standing ground` : `The ${featureWord(kind)} is in the open`);
   const what = `${where}${prize ? ` — ${prize}` : ''}.`;
   const then = shut
-    ? `Cut the tile first. ${action ? 'Working it is a turn of its own after that, and one worker does both.' : held}`
-    : (action ? "One turn's work for whoever goes." : held);
+    ? "Cut the tile first. Working it is a turn of its own after that, and one worker does both."
+    : "One turn's work for whoever goes.";
 
   return `<pre class="art">${esc(art.forFeature(kind))}</pre>`
     + `<p class="note">${esc(what)} ${esc(then)}</p>`;
@@ -1194,6 +1243,10 @@ const FEATURE_WORD = { cache: 'chest', wreck: 'wreck', officer: 'castaway', spri
 const featureWord = (kind) => FEATURE_WORD[kind] || kind;
 
 function featurePrize(kind) {
+  if (kind === 'spring') {
+    const n = C.FEATURES.spring.hands;
+    return `${n} more hand${n === 1 ? '' : 's'}, ashore at the water`;
+  }
   if (kind === 'wreck') return haulText(haulOf(C.FEATURES.wreck));
   if (kind === 'cache') return `${C.FEATURES.cache.gold} gold`;
   if (kind === 'officer') return 'a fifth officer joins the company';
@@ -1245,7 +1298,11 @@ export function summarise(events) {
       case 'feature':
         if (e.feature === 'wreck') out.push(`the shipwreck is searched — ${haulText(e.haul)}`);
         else if (e.feature === 'cache') out.push(`a chest is dug up — ${e.gold} gold`);
-        else if (e.feature === 'officer') out.push('the castaway is saved');
+        else if (e.feature === 'spring') {
+          out.push(e.hands
+            ? `fresh water is drawn — ${e.hands} more hand${e.hands === 1 ? '' : 's'} come ashore`
+            : 'fresh water is drawn, and the crew is already full');
+        } else if (e.feature === 'officer') out.push('the castaway is saved');
         break;
       case 'officer': out.push(`${e.name} joins the company`); break;
       case 'towerMerging':
@@ -1344,6 +1401,17 @@ const ACTIONS = {
   toggleAutoClear(state, payload, ui) { ui.setAutoClear(payload.who, payload.on); },
   toggleDev(state, payload, ui) { ui.dev.flag(payload.flag, payload.on); },
   devGrant(state, payload, ui) { ui.dev.grant(payload.res, payload.amount); },
+  // The star is read first and the turn's own report second: one is what the
+  // island did to you, the other is what you did to it. Chained here rather
+  // than through `ui`, because the box already holds the events the report is
+  // made of — handing them back out and in again would be two copies of one
+  // turn that could disagree.
+  afterEscalation(state, payload, ui) {
+    const events = (current && current.props && current.props.events) || [];
+    const assault = events.find((e) => e.kind === 'assault');
+    if (assault) open('assaultResult', { event: assault }, ui);
+    else open('turnSummary', { events }, ui);
+  },
   endTurn(state, payload, ui) { current = null; ui.endTurn(); },
   // The one setting the player can reach from inside a box that has interrupted
   // them, because that box is the only place they will ever want it.

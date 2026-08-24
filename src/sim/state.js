@@ -35,7 +35,6 @@ export function createState(seed) {
 
     crew: {
       cap: C.HANDS_CAP,
-      capBonus: 0,
       assignments: [],
       // every body on the island stands somewhere; `members` is the roster
       members: [],
@@ -595,8 +594,14 @@ export function idleOfficers(state) {
   const busy = new Set(state.crew.assignments.map((a) => a.who));
   return state.crew.officers.filter((o) => !busy.has(o.id));
 }
+/**
+ * How many hands the island will hold. One number now: the spring used to add
+ * three to it while somebody stood on the water, and the spring hands over
+ * three bodies instead — see `FEATURES.spring`. A run saved with the old bonus
+ * on it simply stops counting it.
+ */
 export function handsCap(state) {
-  return state.crew.cap + state.crew.capBonus;
+  return state.crew.cap;
 }
 /** How many of the crew are cutting ground this turn. */
 export function crewClearing(state) {

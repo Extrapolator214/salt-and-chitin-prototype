@@ -74,7 +74,7 @@ const C = {
     stone: { clearable: true, yield: { stone: 15 }, buildable: true, passable: false, assaultPassable: false, advance: 2.0, targetableVirgin: true, blocksSight: false },
     // Rare ore, worked like a boulder. The Forge still turns stone into iron;
     // this is the seam you can dig instead of smelting for it.
-    iron: { clearable: true, yield: { iron: 10 }, buildable: true, passable: false, assaultPassable: false, advance: 2.0, targetableVirgin: true, blocksSight: false },
+    iron: { clearable: true, yield: { iron: 15 }, buildable: true, passable: false, assaultPassable: false, advance: 2.0, targetableVirgin: true, blocksSight: false },
     road: { clearable: false, yield: {}, buildable: true, passable: true, assaultPassable: true, advance: 1.0, targetableVirgin: true, blocksSight: false },
     sand: { clearable: false, yield: {}, buildable: false, passable: true, assaultPassable: true, advance: 2.0, targetableVirgin: true, blocksSight: false },
     // Open grass. Nothing to cut and nothing under it, so it is walked rather
@@ -519,7 +519,7 @@ const C = {
     { kind: 'hive', name: 'hive', stars: 1, cap: 10, footprint: 8, grubShare: 0.90 },
     { kind: 'shell', name: 'shell spawner', stars: 1, cap: 8, footprint: 4, grubShare: 0.45 },
   ],
-  ESCALATION_TURNS: 30,
+  ESCALATION_TURNS: 25,
   ACCUMULATE_TURNS: 5,
   ADVANCE_TILES_PER_TURN: 6,
   UNITS_PER_STAR: 12,
@@ -552,10 +552,18 @@ const C = {
   // 12 · Treasure and features
   // Each point of interest is worked by a crew member standing on it, and only
   // once the ground is open — a chest under forest is two turns, one to cut the
-  // tile and one to dig. The spring is the exception: it is held, not worked.
+  // tile and one to dig.
+  //
+  // The spring used to be the exception: held rather than worked, paying `+3` to
+  // a cap for exactly as long as somebody stood on it. That was a rule from when
+  // hands were a number. They are named bodies now, so a cap they count against
+  // is bookkeeping about a thing that no longer exists — and standing a man on a
+  // spring for the rest of the run to be allowed three more of him was a worse
+  // trade than it looked. It pays what it always meant: three hands, ashore,
+  // for good.
   FEATURES: {
     cache: { count: 12, gold: 220, action: 'dig up' },
-    spring: { count: 1, handsCap: 3 },
+    spring: { count: 1, hands: 3, action: 'draw from' },
     officer: { count: 1, action: 'save' },
     // A wreck is a ship, so she is carrying a ship's stores: her timbers, the
     // iron out of her fittings, and what little was in the strongbox. Written

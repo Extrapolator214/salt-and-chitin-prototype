@@ -11,7 +11,7 @@ import {
 } from './state.js';
 import * as B from './build.js';
 import {
-  assign, unassign as dropAssignment, recomputeCapBonus, clearCapacity, levelBatch,
+  assign, unassign as dropAssignment, clearCapacity, levelBatch,
   travelTurnsFor, jobPlace, pickNearest, haulOf,
 } from './labour.js';
 import * as A from './assault.js';
@@ -132,7 +132,7 @@ export function crewGroundAtResolve(state) {
   const held = new Set(crewHeld(state));
   for (const o of state.orders) if (o.type === 'buildBridge') held.add(key(o.q, o.r));
   const jobs = state.orders.filter((o) => o.target && o.target.q !== undefined
-    && (o.type === 'assignClear' || o.type === 'workFeature' || o.type === 'assignGarrison'));
+    && (o.type === 'assignClear' || o.type === 'workFeature'));
   if (!jobs.length) { groundCache = { key: k, value: held }; return held; }
   // A pass at a time, because who takes each job depends on the ground opened
   // by the jobs already counted: `projectedCrew` routes to pick its bodies, so
@@ -354,22 +354,6 @@ export const ORDERS = {
     },
   },
 
-  assignGarrison: {
-    label: (o, state) => `station at ${tileLabel(state, o.target)}`,
-    cost: () => NO_COST,
-    hands: (o) => (isHand(o.who) ? 1 : 0),
-    check: (state, o) => {
-      const t = tileAt(state, o.target.q, o.target.r);
-      if (!t || t.feature !== 'spring') return no('nothing to stand on');
-      if (isClearable(state, t)) return no('clear the tile first');
-      return canWorkTile(state, o.target);
-    },
-    apply: (state, o, events, held) => {
-      place(state, o, events, { kind: 'garrison', who: o.who, target: o.target, at: o.target, held });
-      recomputeCapBonus(state);
-    },
-  },
-
   // A point of interest is a job of its own: search the wreck, dig up the
   // chest, save the man. The ground has to be open first, so a chest under
   // forest is two turns — one to cut the tile, one to work what is under it.
@@ -414,7 +398,7 @@ export const ORDERS = {
         const target = state.towers.find((t) => t.id === o.targetId) || state.buildings.find((b) => b.id === o.targetId);
         if (!target) return no('gone');
       }
-      if ((o.kind === 'clear' || o.kind === 'garrison') && o.target) {
+      if (o.kind === 'clear' && o.target) {
         const free = canWorkTile(state, o.target, o.assignmentId);
         if (!free.ok) return free;
       }
@@ -438,7 +422,6 @@ export const ORDERS = {
       a.leftOn = state.turn;
       const turns = travelTurnsFor(state, a.who, jobPlace(state, a, m), held);
       a.arrivesOnTurn = state.turn + (Number.isFinite(turns) ? turns : 0);
-      recomputeCapBonus(state);
     },
   },
 
@@ -824,9 +807,6 @@ export function projectedAssignments(state) {
       case 'assignClear':
         out.push({ id: o.id, kind: 'clear', who: o.who, target: o.target, queued: true });
         break;
-      case 'assignGarrison':
-        out.push({ id: o.id, kind: 'garrison', who: o.who, target: o.target, queued: true });
-        break;
       case 'workFeature':
         out.push({ id: o.id, kind: 'feature', who: o.who, target: o.target, queued: true });
         break;
@@ -898,7 +878,7 @@ export function projectedCrew(state, held) {
   for (const o of state.orders) {
     if (o.type === 'reassign') continue;            // the same body, a new job
     let at = null;
-    if (o.type === 'assignClear' || o.type === 'assignGarrison' || o.type === 'workFeature') {
+    if (o.type === 'assignClear' || o.type === 'workFeature') {
       at = o.target;
     } else if (o.type === 'assignMan') {
       at = jobPlace(state, { kind: 'man', target: o.targetId });
@@ -1345,7 +1325,6 @@ export function standDown(state, assignmentId) {
   // asked for is the player saying to stop putting them on it.
   if (a.auto) stopAutoClear(state, a.who, 'the work was called off');
   dropAssignment(state, a.id);
-  recomputeCapBonus(state);
   addLog(state, `${crewName(state, a.who)} stands down`);
   return ok;
 }

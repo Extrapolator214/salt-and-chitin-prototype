@@ -443,19 +443,30 @@ function tickReel(dt) {
 function finishTurn() {
   const events = ui.pendingEvents;
   ui.pendingEvents = [];
+  // The turn the star landed on, kept before `concludeTurn` moves the clock:
+  // the act turns on the turn after it, and the box says which.
+  const turn = state.turn;
   concludeTurn(state, events);
   strip.hidden = true;
 
-  const assault = events.find((e) => e.kind === 'assault');
-  // The end of the run is not a turn report and is never skipped — there is no
-  // next phase to get on with, and the one thing left to say is how it went.
-  // The other two are reports of a resolve, which is what skipping asks not to
-  // be shown: the turn is over and the map is back.
+  // An ordinary star is a pane on the reel and nothing here — it closes itself,
+  // and skipping the reel skips it, like every other thing the resolve shows.
+  // The act turning is the exception: it is the one moment in a run whose rules
+  // change, so it is a modal, it waits to be dismissed, and it is shown whatever
+  // the reel is set to. The end of the run is exempt for the same reason.
+  const act = events.find((e) => e.kind === 'escalation' && e.endsAct);
+  const report = ui.reelSpeed !== 'skip';
   if (state.outcome) modals.open('endOfRun', {}, ui);
-  else if (ui.reelSpeed !== 'skip') {                // every turn closes with a report
-    if (assault) modals.open('assaultResult', { event: assault }, ui);
-    else modals.open('turnSummary', { events }, ui);
-  }
+  else if (act) modals.open('escalation', { events, turn, report }, ui);
+  else if (report) turnReport(events);               // every turn closes with a report
+  refresh();
+}
+
+/** The resolve's own report: the assault if there was one, else the summary. */
+function turnReport(events) {
+  const assault = events.find((e) => e.kind === 'assault');
+  if (assault) modals.open('assaultResult', { event: assault }, ui);
+  else modals.open('turnSummary', { events }, ui);
   refresh();
 }
 

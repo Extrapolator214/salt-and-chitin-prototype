@@ -1092,7 +1092,7 @@ So the payout is its own order. Each point of interest has a verb, in
 | shipwreck | search | 60 wood, 30 iron, 10 gold |
 | treasure cache | dig up | 220 gold |
 | officer site | save | the fifth officer joins |
-| freshwater spring | *(held, not worked)* | +3 hands cap while someone stands on it |
+| freshwater spring | draw from | 3 more hands, who come ashore at the spring itself |
 
 The job is available **once there is nothing left to cut on the tile** — so a
 chest under forest is two turns, one to clear and one to dig, and a wreck on
@@ -1141,10 +1141,11 @@ one in the spec:
 
 **There is an eleventh terrain the spec does not have: `iron`.** Two points of
 the natural mix, carved out of forest and scrub, cleared like a boulder — three
-turns, impassable to a mass until it is cut — and it pays **10 iron** a tile.
+turns, impassable to a mass until it is cut — and it pays **15 iron** a tile.
 It matters more than 2% suggests, because iron is otherwise the scarcest thing
 in the game: one Forge makes 1 a turn, and a flare wants 40. A seam inside the
-road you were going to cut anyway is most of a flare. It is also why the natural
+road you were going to cut anyway is a third of a flare, or two fittings and
+change. It is also why the natural
 mix renormalises over nine terrains rather than eight.
 
 

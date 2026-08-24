@@ -32,9 +32,13 @@ import * as art from './ascii.js';
 const WALK_MIN = 1.1;
 const WALK_PER_STEP = 0.22;
 const WALK_MAX = 4.0;
-const POI_SECONDS = 11;
-const BREED_SECONDS = 4.5;
-const RELEASE_SECONDS = 12;
+// One number for every pane. They used to hold 4.5, 11 and 12 seconds, which
+// is three different answers to one question — how long a picture and two
+// numbers take to read — and the difference between them was never a decision
+// about the panes, only the order they were written in. The walk keeps its own
+// pacing because it is not a thing to be read: it is a thing to be watched, and
+// it is as long as the walk was.
+const PANE_SECONDS = 9;
 
 // How hard the camera is pulled to the beat's subject. Exponential smoothing,
 // so it is framerate independent — a dropped frame moves it further, not less.
@@ -202,13 +206,33 @@ export function build(state, events, before) {
     beats.push({
       kind: 'poi',
       feature: e.feature,
-      haul: e.haul, gold: e.gold,
+      haul: e.haul, gold: e.gold, hands: e.hands,
       name: e.feature === 'officer' && joined ? joined.name : null,
       trade: e.feature === 'officer' && joined ? joined.trade : null,
       focus: { q: e.q, r: e.r },
-      seconds: POI_SECONDS,
+      seconds: PANE_SECONDS,
     });
   });
+
+  // A star, if one landed. Ahead of the breeding pane, which draws the counter
+  // it just changed — the news first, then what the island looks like with it.
+  //
+  // Only the ordinary ones. A star that ends an act is a modal instead: it is
+  // the one moment in a run that should not be skippable, and a pane that
+  // closes itself after nine seconds is skippable by looking away.
+  for (const e of events) {
+    if (e.kind !== 'escalation' || e.endsAct) continue;
+    const sp = state.spawners.find((x) => x.id === e.id);
+    beats.push({
+      kind: 'star',
+      spawner: e.spawner,
+      kindOf: sp ? sp.kind : 'hive',
+      stars: e.stars,
+      cap: sp ? sp.cap : e.stars,
+      focus: sp ? { q: sp.q, r: sp.r } : null,
+      seconds: PANE_SECONDS,
+    });
+  }
 
   // Read off the spawners rather than off an event, because breeding does not
   // raise one — it is a counter ticking, and the counter is already on the state
@@ -222,7 +246,7 @@ export function build(state, events, before) {
         turns: s.accumulatedTurns, of: C.ACCUMULATE_TURNS,
       })),
       focus: null,
-      seconds: BREED_SECONDS,
+      seconds: PANE_SECONDS,
     });
   }
 
@@ -235,7 +259,7 @@ export function build(state, events, before) {
         return { kind: sp ? sp.kind : 'hive', name: e.spawner, units: e.units, q: e.q, r: e.r };
       }),
       focus: centroid(released.map((e) => ({ q: e.q, r: e.r }))),
-      seconds: RELEASE_SECONDS,
+      seconds: PANE_SECONDS,
     });
   }
 
@@ -400,8 +424,26 @@ function poiPane(b) {
       `<b>+${b.gold}</b> gold — a <b>Peculiar Merchant</b> sells guns for it, `
       + 'where a Workshop sells nothing and wants iron');
   }
+  if (b.feature === 'spring') {
+    return pane('fresh water is drawn', art.SPRING, b.hands
+      ? `<b>${b.hands}</b> more hand${b.hands === 1 ? '' : 's'} come ashore at the water`
+      : 'and the crew is already as big as the island will hold');
+  }
   return pane('a castaway is saved', art.CASTAWAY,
     b.name ? `${esc(b.name)} joins the company — ${esc(b.trade || 'a pirate')}` : 'he joins the company');
+}
+
+/** A star: what it is worth, in the two numbers a star moves. */
+function starPane(b) {
+  const was = b.stars - 1;
+  const grown = (n) => 1 + C.UNIT_DANGER_SCALE * (n - 1) ** C.UNIT_DANGER_EXP;
+  const stars = '*'.repeat(b.stars) + '-'.repeat(Math.max(0, b.cap - b.stars));
+  return '<h2>the enemy grows</h2>'
+    + `<pre class="art bad">${esc(art.forSpawner(b.kindOf))}</pre>`
+    + `<div class="reel-name">${esc(b.spawner)} <span class="bar">${esc(stars)}</span> ${b.stars}/${b.cap}</div>`
+    + `<p class="note">cohorts of <b>${was * C.UNITS_PER_STAR}</b> &rarr; <b>${b.stars * C.UNITS_PER_STAR}</b>`
+    + ` · every unit <b>${grown(was).toFixed(2)}x</b> &rarr; <b>${grown(b.stars).toFixed(2)}x</b> hp and armour`
+    + ' · an <b>elite</b> rides its next cohort</p>';
 }
 
 /** Both fronts side by side, each in its own equal share of the width. */
@@ -442,6 +484,7 @@ function releasePane(b) {
 export function paneHtml(reel) {
   const b = beat(reel);
   if (!b || b.kind === 'walk') return null;
+  if (b.kind === 'star') return starPane(b) + FOOT;
   if (b.kind === 'poi') return poiPane(b) + FOOT;
   if (b.kind === 'breed') return breedPane(b) + FOOT;
   if (b.kind === 'release') return releasePane(b) + FOOT;
@@ -451,6 +494,7 @@ export function paneHtml(reel) {
 /** What the beat on screen is, in the panel's own words. */
 const BEAT_LABEL = {
   walk: 'the island moves',
+  star: 'the enemy grows',
   poi: 'a site is worked',
   breed: 'the island breeds',
   release: 'cohorts released',

@@ -6,6 +6,7 @@ import {
   tileAt, terrainDef, isClearable, touchMap, addLog, arrived, nextId, drawPick,
   officerById, memberById, idleMembers, isHand, landCrew, isOpenGround,
   crewHeld, blocksCrew, walkableFromBase, handsNeededFor, crewName, devCrossable, devFlag,
+  handsCap, handCount, landHands,
 } from './state.js';
 import { Heap } from './enemy.js';
 
@@ -109,6 +110,17 @@ export function workFeature(state, tile, events) {
     state.stats.goldEarned += C.FEATURES.cache.gold;
     events.push({ kind: 'feature', feature: 'cache', q: tile.q, r: tile.r, gold: C.FEATURES.cache.gold });
     addLog(state, `a treasure cache at (${tile.q},${tile.r}) is dug up — ${C.FEATURES.cache.gold} gold`);
+  } else if (kind === 'spring') {
+    const n = C.FEATURES.spring.hands;
+    const room = Math.max(0, handsCap(state) - handCount(state));
+    // At the water, not at the ship: they are the crew the spring found, and a
+    // body that walked out to the middle of the island should not have to walk
+    // back for them. `landCrew` spreads them over the open ground around it.
+    const landed = landHands(state, Math.min(room, n), { q: tile.q, r: tile.r }).length;
+    events.push({ kind: 'feature', feature: 'spring', q: tile.q, r: tile.r, hands: landed });
+    addLog(state, landed
+      ? `fresh water at (${tile.q},${tile.r}) — ${landed} more hand${landed === 1 ? '' : 's'} come ashore`
+      : `fresh water at (${tile.q},${tile.r}), and nowhere to put anybody: the crew is full`);
   } else if (kind === 'officer') {
     events.push({ kind: 'feature', feature: 'officer', q: tile.q, r: tile.r });
     recruitPirate(state, events, { q: tile.q, r: tile.r });
@@ -462,18 +474,7 @@ export function runLabour(state, events) {
     addLog(state, `cleared ${tiles} tile${tiles === 1 ? '' : 's'} (+${gained.wood} wood, +${gained.stone} stone`
       + `${gained.iron ? `, +${gained.iron} iron` : ''})`);
   }
-  recomputeCapBonus(state);
   return { tiles, gained };
-}
-
-/** The freshwater spring lifts the cap while a hand stands on it. */
-export function recomputeCapBonus(state) {
-  const onSpring = state.crew.assignments.some((a) => {
-    if (a.kind !== 'garrison' || !arrived(state, a)) return false;
-    const t = tileAt(state, a.target.q, a.target.r);
-    return t && t.feature === 'spring';
-  });
-  state.crew.capBonus = onSpring ? C.FEATURES.spring.handsCap : 0;
 }
 
 // ---- assignment ------------------------------------------------------------

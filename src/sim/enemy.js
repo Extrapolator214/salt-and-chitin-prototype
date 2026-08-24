@@ -259,7 +259,11 @@ export function escalate(state, events) {
   const sp = drawPick(state, alive);
   sp.stars++;
   sp.eliteNext = true;
-  events.push({ kind: 'escalation', spawner: sp.name, id: sp.id, stars: sp.stars });
+  // An act begins on the turn after this resolve, so the star that lands on the
+  // last turn of one is the star that announces the next. Marked here, where the
+  // clock is, rather than worked out again by everything that reads the event.
+  const endsAct = C.actOf(state.turn + 1) > C.actOf(state.turn);
+  events.push({ kind: 'escalation', spawner: sp.name, id: sp.id, stars: sp.stars, endsAct });
   addLog(state, `the ${sp.name} gains a star (${sp.stars})`);
 }
 

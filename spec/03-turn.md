@@ -57,7 +57,7 @@ Execute exactly this sequence.
 4.  buildings produce: Forge, Trading Dock, Excavation Camp
 5.  flares in flight land; hands added
 6.  assaults: march ticks, arrivals resolve
-7.  escalation: every 50th turn one random living spawner gains a star
+7.  escalation: every 25th turn one random living spawner gains a star
 8.  spawners: accumulate or advance (§4)
 9.  contact: any cohort reaching a road triggers combat (§5)
 10. end checks: hull <= 0 -> lost · all spawners dead -> won · turn 300 -> lost
