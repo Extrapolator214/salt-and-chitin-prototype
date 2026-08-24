@@ -3,7 +3,7 @@
 
 import C from './config.js';
 import { tileAt, addLog, isBuildingManned, handsCap, handCount, totalPower, touchMap, landHands } from './state.js';
-import { applyQueue } from './orders.js';
+import { applyQueue, autoClearOrders } from './orders.js';
 import { runLabour, runMovement, standDownSurplus } from './labour.js';
 import { tickTowerMerges } from './build.js';
 import { runSpawners, advanceCohorts, escalate } from './enemy.js';
@@ -118,6 +118,11 @@ export function concludeTurn(state, events = []) {
   state.turn++;
   state.act = C.actOf(state.turn);
   state.phase = 'player';
+  // The standing orders, run once the new turn is the player's: anyone on
+  // auto-clear with nothing to do is put on the nearest face. They go into the
+  // queue like any other order, so the first thing the player sees is what was
+  // decided for them, with a × beside it.
+  autoClearOrders(state);
   return events;
 }
 

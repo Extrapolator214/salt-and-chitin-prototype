@@ -151,6 +151,25 @@ surviving units deal their hull damage and are removed.
 
 Control returns to the player phase and the turn counter advances.
 
+**Standing orders run first.** Anyone with **auto-clear** ticked in the crew
+panel and nothing to do is queued onto the nearest tile that can be cut — nearest
+by the walk, since the order is enqueued like any other and refused for the same
+reasons, and the next candidate is tried instead. What comes out is a queue the
+player reads before anything happens, with a `x` beside every line. Taking one
+back, or standing the worker down off the job it became, turns that body's tick
+off again: work nobody asked for, called off, is the player saying to stop
+asking for it.
+
+Ticked mid-turn on a body standing about, it runs **there and then**, for that
+body alone — a man idle with the box just ticked in front of you should not have
+to wait a turn for the face he is standing next to.
+
+A labour officer is handed **his whole capacity**, not one face: the Master
+Pioneer takes three, grown out from the nearest as one batch — same ground,
+touching — which is what the queue would hold him to anyway and what the map
+offers under the pointer. If the blob runs out before his capacity does he takes
+what there was.
+
 ## §6 · Acts
 
 | act | turns | flares allowed (cumulative) |

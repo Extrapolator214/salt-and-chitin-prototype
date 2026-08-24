@@ -379,6 +379,12 @@ const C = {
   // for an upgraded building that also stands inside one. Bought once per
   // building — there is nothing below nobody.
   CREW_UPGRADE_GOLD: 50,
+  // Pulling a yard down again. Higher than a tower's 80% on purpose: a gun is
+  // an emplacement and a fitting, and the fitting comes back whole, where a yard
+  // is nothing but the wood and stone that went into it. What is lost is the
+  // turn it took to build and the turn it takes to build again somewhere else —
+  // which is the right price for changing your mind about where a house goes.
+  BUILDING_REFUND: 0.90,
   BUNKHOUSE_RADIUS: 3,
   // 00-constants.md §9 prices every building at 120 wood + 80 stone. This build
   // charges each one for what it is worth: the Sappers' Camp is the only route

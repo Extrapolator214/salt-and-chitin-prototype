@@ -101,6 +101,16 @@ const ui = {
     refresh();
   },
   order: (o) => { const r = O.enqueue(state, o); if (!r.ok) flash(r.why); return r; },
+  // A standing order on a body rather than an order in the queue: it is read at
+  // the top of every turn, so it is part of the run and saved with it.
+  // Switched on mid-turn, it starts now: a body standing about with the box
+  // just ticked in front of you should not wait for the next turn to be given
+  // the face he is standing next to.
+  setAutoClear: (who, on) => {
+    St.setAutoClear(state, who, on);
+    if (on) O.autoClearOrders(state, who);
+    refresh();
+  },
   // One of the two things that are not orders: goods over the dock's counter,
   // paid for and handed across on the spot. It moves the stores, so it goes through the
   // same refusal path as an order — and through `refresh`, which is what writes

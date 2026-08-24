@@ -142,6 +142,16 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 
 Excavation Camp and Bunkhouse may be built repeatedly; the rest are one each.
 
+**A yard can be pulled down again.** `BUILDING_REFUND` (90%) of what was paid
+comes back — the crew upgrade included, if one was bought — the ground comes
+free, and whoever was manning it walks out. A ruin refunds the same: the player
+paid the same for it, and clearing rubble should not be dearer than clearing a
+working house. An Excavation Camp pulled down before it pays gives its cache
+back undug rather than burying it for the rest of the run. The Palisade is not
+offered it: it is not one of the eleven. What is lost is the turn it took to
+build and the turn it takes to build again somewhere else, which is the right
+price for changing your mind about where a house goes.
+
 **A requirement that falls sends the surplus home.** A Bunkhouse finished within
 reach, or a crew upgrade paid for, drops what a house wants by a hand — and the
 hand already standing in it is stood down that same turn (step 3) rather than

@@ -559,6 +559,22 @@ export const assignmentsFor = (state, targetId) =>
 
 export const arrived = (state, a) => a.arrivesOnTurn <= state.turn;
 
+/**
+ * Auto-clear: a standing order to a body rather than an order in the queue.
+ *
+ * Kept on the member and so saved with the run. Off for everybody by default —
+ * it decides what a worker does with turns the player has not thought about, and
+ * that is not a thing to switch on for them.
+ */
+export const autoClearOn = (state, who) => !!(memberById(state, who) || {}).autoClear;
+
+export function setAutoClear(state, who, on) {
+  const m = memberById(state, who);
+  if (!m) return false;
+  m.autoClear = !!on;
+  return true;
+}
+
 /** A worker is either an anonymous hand (h1, h2, ...) or a named officer. */
 export const isHand = (who) => who === 'hand' || /^h\d+$/.test(who);
 

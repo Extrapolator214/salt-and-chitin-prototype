@@ -7,7 +7,7 @@ import {
   tileAt, towerRange, towerPower, towerManning, isBuildingManned, handsNeededFor,
   assignmentsFor, arrived, holdCap, holdFree, hasBuilding, idleHands, idleOfficers,
   buildingsOfType, isBuildable, officerById, handCount, crewName, isClearable, isOpenGround,
-  memberById, DEV_FLAGS, devFlag,
+  memberById, DEV_FLAGS, devFlag, autoClearOn,
 } from '../sim/state.js';
 import * as O from '../sim/orders.js';
 import { tileLabel } from '../sim/orders.js';
@@ -90,6 +90,40 @@ const DEV_WHY = {
     + 'the sea and boulders still are not, and the cohorts are not affected',
 };
 const DEV_GRANT = 100;
+
+/**
+ * Pulling a house down, offered on its own panel and nowhere else.
+ *
+ * Last on the panel, under everything that keeps the building standing: it is
+ * the one thing here that cannot be undone by another order, and it should be
+ * read after the alternatives rather than before them.
+ */
+/**
+ * The auto-clear tick for one body.
+ *
+ * A checkbox rather than a button because it is a state and not an act: what it
+ * says is "and again next turn", which a button cannot say. The `on` in the
+ * payload is read when the row is drawn, so the click always asks for the
+ * opposite of what is on the screen.
+ */
+const autoBox = (state, who) => {
+  const on = autoClearOn(state, who);
+  return `<label><input type="checkbox" data-x="toggleAutoClear" `
+    + `data-arg='${esc(JSON.stringify({ who, on: !on }))}'${on ? ' checked' : ''}></label>`;
+};
+
+const demolishSection = (state, b) => {
+  if (!B.canDemolish(state, b).ok) return '';
+  const order = { type: 'demolishBuilding', buildingId: b.id };
+  const can = O.canEnqueue(state, order);
+  return '<h3>pull it down</h3>'
+    + `<p class="note">The ground comes free and ${Math.round(C.BUILDING_REFUND * 100)}% of what was paid `
+    + `comes back — ${costText(B.demolishRefund(b))}${b.upgraded ? ', the crew upgrade included' : ''}. `
+    + `Whoever is manning it walks out.${b.type === 'excavation' && b.progress < C.EXCAVATION_TURNS
+      ? ' The cache under it is given back undug.' : ''}</p>`
+    + btn('Pull it down', 'order', order, !can.ok)
+    + (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
+};
 
 const row = (cells, off, why) =>
   `<tr class="${off ? 'off' : ''}">${cells.map((c) => `<td>${c}</td>`).join('')}` +
@@ -312,6 +346,10 @@ const VIEWS = {
       const fix = { type: 'repairBuilding', buildingId: b.id };
       const can = O.canEnqueue(state, fix);
       h += btn('Rebuild', 'order', fix, !can.ok) + (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
+      // A ruin is the one a player most often wants rid of rather than back, so
+      // the offer to pull it down is on this panel too — at the same rate, since
+      // they paid the same for it.
+      h += demolishSection(state, b);
       return h;
     }
 
@@ -378,6 +416,8 @@ const VIEWS = {
       `It stacks with a Bunkhouse — upgraded and inside one, it wants nobody at all.</p>`;
     h += btn(b.upgraded ? 'Upgraded' : `Upgrade (${C.CREW_UPGRADE_GOLD} gold)`, 'order', up, !canUp.ok) +
       (canUp.ok ? '' : ` <span class="why">${esc(canUp.why)}</span>`);
+
+    h += demolishSection(state, b);
     return h;
   },
 
@@ -574,7 +614,7 @@ const VIEWS = {
       `${O.projectedHands(state)} idle once the queue runs · officers replace a hand one for one · ` +
       'a short walk is free — the worker gets there and starts the same turn; a longer one costs a turn, ' +
       'a march across the island two. It is the way round that counts, not the straight line</p>';
-    h += '<table><tr><th>who</th><th>task</th><th>target</th><th>state</th><th></th></tr>';
+    h += '<table><tr><th>who</th><th>task</th><th>target</th><th>state</th><th>auto-clear</th><th></th></tr>';
     for (const a of tasks) {
       const officer = officerById(state, a.who);
       const who = officer ? `<b>${esc(crewName(state, a.who))}</b>` : esc(crewName(state, a.who));
@@ -586,7 +626,8 @@ const VIEWS = {
         : a.kind === 'assault' ? ''
           : btn('Idle', 'standDown', { id: a.id });
       h += `<tr class="${a.queued ? 'queued' : ''}"><td>${who}</td><td>${a.kind}</td>` +
-        `<td>${target}</td><td>${when}</td><td>${stop} ${locateBtn(state, a.who)}</td></tr>`;
+        `<td>${target}</td><td>${when}</td><td>${autoBox(state, a.who)}</td>` +
+        `<td>${stop} ${locateBtn(state, a.who)}</td></tr>`;
     }
     // everyone else is standing about somewhere, which is where their next walk
     // is measured from
@@ -595,11 +636,14 @@ const VIEWS = {
       const officer = officerById(state, m.id);
       h += row([officer ? `<b>${esc(m.name)}</b>` : esc(m.name), 'idle',
         officer ? `<span class="note">${esc(C.officerVerb(officer))}</span>` : `standing at (${m.q},${m.r})`,
-        'free', locateBtn(state, m.id)]);
+        'free', autoBox(state, m.id), locateBtn(state, m.id)]);
     }
     h += '</table>';
     h += '<p class="note">To put someone to work: shift-click a tile to clear it, or open a tower or building and man it. ' +
       'A worker has to be able to walk there, so ground cut off by river, cliff or boulder cannot be worked until a way is opened.</p>';
+    h += '<p class="note"><b>auto-clear</b>: at the top of every turn, anyone ticked and standing about is queued onto the '
+      + 'nearest tile that can be cut. It is an order like any other — it sits in the queue with a <b>x</b> beside it, and '
+      + 'taking one back, or standing the worker down off it, turns the tick off again.</p>';
     // The way back. A reminder turned off inside the box that raised it has no
     // other door, and a setting with no way back on is a trap rather than a
     // choice — this is the panel about the crew standing about, so it goes here.
@@ -1168,6 +1212,10 @@ export function summarise(events) {
     switch (e.kind) {
       case 'cleared': out.push(`cleared ${e.tiles} tiles: +${e.wood} wood, +${e.stone} stone`); break;
       case 'built': out.push(`${e.what} stands at (${e.q}, ${e.r})`); break;
+      case 'demolished':
+        out.push(`${e.what} at (${e.q}, ${e.r}) is pulled down — `
+          + `${Object.entries(e.refund).map(([k, v]) => `${v} ${k}`).join(', ')} back`);
+        break;
       // Worth a line of its own: the hands are back in the pool this turn, and a
       // player who does not know that leaves them unspent.
       case 'standDown':
@@ -1288,6 +1336,7 @@ const ACTIONS = {
   // The dev menu. Both of these go through `ui` rather than touching the state
   // here, because what makes them "instant" is the same refresh that writes the
   // run down — see main.js.
+  toggleAutoClear(state, payload, ui) { ui.setAutoClear(payload.who, payload.on); },
   toggleDev(state, payload, ui) { ui.dev.flag(payload.flag, payload.on); },
   devGrant(state, payload, ui) { ui.dev.grant(payload.res, payload.amount); },
   endTurn(state, payload, ui) { current = null; ui.endTurn(); },

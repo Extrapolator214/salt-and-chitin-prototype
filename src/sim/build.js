@@ -544,6 +544,57 @@ export function buildBuilding(state, type, q, r) {
   return b;
 }
 
+/**
+ * Pulling a yard down and taking the materials back.
+ *
+ * A plot is a decision made once and lived with for the rest of the run: where
+ * the first Forge went settles which way the road grows, and a player who put it
+ * somewhere they now want a Bunkhouse had no way to undo it. A gun could always
+ * be lifted and put down elsewhere; a house could not.
+ *
+ * The Palisade is left out because it is not one of the eleven — it is a tile of
+ * ground the enemy will not cross, and taking it down is a different question
+ * from moving a workshop.
+ */
+export function canDemolish(state, b) {
+  if (!b) return no('gone');
+  if (!isEconomic(C.buildingDef(b.type))) return no('a Palisade is not a yard');
+  return ok;
+}
+
+/**
+ * What comes back: `BUILDING_REFUND` of what was paid for it, the crew upgrade
+ * included if one was bought. A ruin refunds the same — the player paid the same
+ * for it, and clearing rubble should not be dearer than clearing a working
+ * house — so the loss is always the same flat tenth however it ends.
+ */
+export function demolishRefund(b) {
+  const out = {};
+  for (const [k, v] of Object.entries(C.buildingCost(b.type))) {
+    out[k] = Math.floor(v * C.BUILDING_REFUND);
+  }
+  if (b.upgraded) out.gold = (out.gold || 0) + Math.floor(C.CREW_UPGRADE_GOLD * C.BUILDING_REFUND);
+  return out;
+}
+
+export function demolishBuilding(state, b) {
+  const refund = demolishRefund(b);
+  for (const [res, n] of Object.entries(refund)) state.res[res] += n;
+  // An Excavation Camp claims its cache the day it is built and pays out ten
+  // turns later. Pulled down before it pays, it gives the cache back rather than
+  // burying it for the rest of the run — the gold under it was never the camp's.
+  if (b.type === 'excavation' && b.cache && b.progress < C.EXCAVATION_TURNS) {
+    const t = tileAt(state, b.cache.q, b.cache.r);
+    if (t) t.featureWorked = false;
+  }
+  release(state, b.tiles);
+  state.buildings.splice(state.buildings.indexOf(b), 1);
+  // the crew walk out of it, the same as out of a ruin
+  state.crew.assignments = state.crew.assignments.filter((a) => !(a.kind === 'man' && a.target === b.id));
+  touchMap(state);
+  return refund;
+}
+
 /** What putting a ruin back on its feet costs — a fraction of building it new. */
 export function rebuildCost(type) {
   const out = {};

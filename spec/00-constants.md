@@ -299,6 +299,8 @@ building that wants two takes two, and the third order is refused.
 | Palisade | — | 1 | the enemy will not cross it; no crew · **45 wood + 30 stone**, a third of the flat price |
 
 Excavation Camp, Bunkhouse and Palisade are repeatable; the rest are one each.
+Any of them but the Palisade can be pulled down again for `BUILDING_REFUND` — 90%
+of what was paid, the crew upgrade included.
 
 **Under attack** (build rules). A tower is a fortification and nothing in the
 resolve attacks one; an economic building is not.

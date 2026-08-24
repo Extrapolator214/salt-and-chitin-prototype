@@ -1808,6 +1808,141 @@ runSection('3.6d', () => {
       back.ok ? `left on ${again && again.leftOn}, arrives ${again && again.arrivesOnTurn}` : back.why);
   }
   {
+    // Auto-clear: a standing order on a body, read at the top of every turn.
+    const s = St.createState(20260816);
+    // open the ground around the ship so there is a frontier to be put on
+    for (const h of H.spiral(s.base, 3)) {
+      const t = St.tileAt(s, h.q, h.r);
+      if (t && !t.occupant && t.terrain !== 'saltwater') { t.terrain = 'road'; t.cleared = true; }
+    }
+    St.touchMap(s);
+    const who = s.crew.members.find((m) => m.kind === 'hand').id;
+    playTurn(s, true);
+    t('nobody is put to work until it is asked for',
+      !s.orders.length && !s.crew.assignments.length, `${s.orders.length} queued`);
+
+    // The Master Pioneer cuts three at once, so auto-clear hands him three —
+    // one batch, one terrain, touching, exactly what the map would offer.
+    St.setAutoClear(s, 'builder', true);
+    O.autoClearOrders(s, 'builder');
+    const his = s.orders.filter((o) => o.type === 'assignClear' && o.who === 'builder');
+    const faces = his.map((o) => St.tileAt(s, o.target.q, o.target.r));
+    t('a labour officer is handed his whole capacity, not one face',
+      his.length === L.clearCapacity(s, 'builder') && his.length === 3,
+      `${his.length} of ${L.clearCapacity(s, 'builder')}`);
+    t('and the batch is one kind of ground, touching',
+      faces.every((f) => f.terrain === faces[0].terrain)
+      && faces.slice(1).every((f, i) => faces.slice(0, i + 1).some((b) => H.distance(b, f) === 1)),
+      faces.map((f) => `${f.terrain}(${f.q},${f.r})`).join(' '));
+    St.setAutoClear(s, 'builder', false);
+    s.orders.length = 0;
+
+    // Ticked mid-turn on a body standing about: it starts now, not next turn.
+    St.setAutoClear(s, who, true);
+    O.autoClearOrders(s, who);
+    t('ticking it on a free worker queues him a face there and then',
+      s.orders.filter((o) => o.type === 'assignClear' && o.who === who && o.auto).length === 1,
+      `${s.orders.length} orders`);
+    t('and it puts nobody else to work', s.orders.every((o) => o.who === who));
+    s.orders.length = 0;
+
+    playTurn(s, true);
+    const queued = s.orders.filter((o) => o.type === 'assignClear' && o.who === who);
+    t('a body on auto-clear is queued onto a face at the top of the turn',
+      queued.length === 1 && queued[0].auto === true,
+      `${s.orders.length} orders, ${queued.length} his`);
+    t('and it is an order, so it can be read and taken back',
+      !!O.describe && s.orders.some((o) => o.id === queued[0].id));
+
+    // taking it back is how the player says they did not want it asked for
+    O.revoke(s, queued[0].id);
+    t('revoking an auto order turns the tick off', !St.autoClearOn(s, who));
+
+    // and so is standing the worker down once the walk has started
+    St.setAutoClear(s, who, true);
+    playTurn(s, true);
+    playTurn(s, true);
+    const on = s.crew.assignments.find((a) => a.who === who && a.kind === 'clear');
+    t('the assignment it becomes remembers where it came from', !!on && on.auto === true);
+    if (on) O.standDown(s, on.id);
+    t('standing him down off it turns the tick off too', !St.autoClearOn(s, who));
+    playTurn(s, true);
+    t('and he is left alone after that',
+      !s.orders.some((o) => o.who === who) && !s.crew.assignments.some((a) => a.who === who),
+      `${s.orders.length} orders`);
+  }
+  {
+    // Which tile the Pioneer seeds his batch from, on ground built for the case
+    // rather than hunted for on some seed: a lone tile of scrub in a frontier of
+    // forest, with him standing on it.
+    const s = St.createState(20260816);
+    for (const h of H.spiral(s.base, 3)) {
+      const t2 = St.tileAt(s, h.q, h.r);
+      if (t2 && !t2.occupant && t2.terrain !== 'saltwater') { t2.terrain = 'road'; t2.cleared = true; }
+    }
+    St.touchMap(s);
+    const lone = O.workableTiles(s)[0];
+    lone.terrain = 'scrub';
+    for (const n of H.neighbours(lone.q, lone.r)) {
+      const t2 = St.tileAt(s, n.q, n.r);
+      if (t2 && St.isClearable(s, t2)) t2.terrain = 'forest';
+    }
+    St.touchMap(s);
+    const him = St.memberById(s, 'builder');
+    him.q = lone.q; him.r = lone.r;
+
+    St.setAutoClear(s, 'builder', true);
+    O.autoClearOrders(s, 'builder');
+    const got = s.orders.filter((o) => o.who === 'builder');
+    const tookLone = got.some((o) => o.target.q === lone.q && o.target.r === lone.r);
+    t('a seed with no run in it is dropped for one that has',
+      got.length === 3 && !tookLone,
+      `${got.length} faces, the lone scrub under his feet ${tookLone ? 'taken' : 'passed over'}`);
+    s.orders.length = 0;
+
+    // He picks before the hands do: ten bodies each taking the nearest tile
+    // would otherwise have eaten every run of three by the time he is asked.
+    for (const m of s.crew.members) St.setAutoClear(s, m.id, true);
+    O.autoClearOrders(s);
+    const mine = s.orders.filter((o) => o.who === 'builder');
+    t('and he is served first, so the run is still there when he asks',
+      mine.length === L.clearCapacity(s, 'builder'),
+      `${mine.length} of ${L.clearCapacity(s, 'builder')}, ${s.orders.length} orders in all`);
+  }
+  {
+    // Pulling a yard down. A plot used to be a decision made once and lived with
+    // for the whole run; a gun could always be lifted and put down elsewhere.
+    const { s, b } = yard();
+    O.enqueue(s, { type: 'assignMan', who: 'hand', targetId: b.id });
+    playTurn(s, true);
+    const paid = C.buildingCost(b.type);
+    const before = { ...s.res };
+    const idleBefore = St.idleHands(s);
+    const ground = b.tiles.map((t) => `${t.q},${t.r}`);
+    const refund = B.demolishRefund(b);
+    t('what comes back is 90% of what was paid',
+      Object.entries(paid).every(([k, v]) => refund[k] === Math.floor(v * C.BUILDING_REFUND)),
+      `paid ${JSON.stringify(paid)}, back ${JSON.stringify(refund)}`);
+
+    const said = O.canEnqueue(s, { type: 'demolishBuilding', buildingId: b.id });
+    O.enqueue(s, { type: 'demolishBuilding', buildingId: b.id });
+    t('and a second order for the same house is refused',
+      said.ok && !O.canEnqueue(s, { type: 'demolishBuilding', buildingId: b.id }).ok);
+    t('as is manning one that is coming down',
+      !O.canEnqueue(s, { type: 'assignMan', who: 'hand', targetId: b.id }).ok);
+    const { events } = playTurn(s, true);
+    t('the house is gone, the stores are up and the ground is free',
+      !s.buildings.some((x) => x.id === b.id)
+      && Object.entries(refund).every(([k, v]) => s.res[k] === before[k] + v)
+      && ground.every((k) => !St.tileAt(s, ...k.split(',').map(Number)).occupant)
+      && events.some((e) => e.kind === 'demolished'),
+      `${JSON.stringify(before)} -> ${JSON.stringify(s.res)}`);
+    t('and whoever was manning it is idle again', St.idleHands(s) === idleBefore + 1,
+      `${idleBefore} -> ${St.idleHands(s)}`);
+    t('a Palisade is not a yard and is not offered it',
+      !B.canDemolish(s, { type: 'wall', tiles: [] }).ok);
+  }
+  {
     // A Bunkhouse finished beside a full house is a place in its crew that no
     // longer exists. The body in it is idle again the same turn, without the
     // player having to notice and pick him off by hand.

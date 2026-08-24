@@ -7,7 +7,7 @@ import { distance, key, parseKey, neighbours, NEIGHBOURS } from './hex.js';
 import {
   tileAt, addLog, nextId, idleHands, idleOfficers, officerById, holdFree, holdCap,
   hasBuilding, isBuildingManned, buildingsOfType, walkableForWork, isClearable, memberById,
-  handsNeededFor, towerManning, isHand, crewHeld, crewName,
+  handsNeededFor, towerManning, isHand, crewHeld, crewName, autoClearOn, setAutoClear,
 } from './state.js';
 import * as B from './build.js';
 import {
@@ -266,6 +266,14 @@ export function queuedTiles(state) {
       } else out.push({ q: o.q, r: o.r, kind: o.type });
     }
   }
+  // A house queued to come down has no tile on the order — it names a building —
+  // but its ground is as spoken for as any plot, and the player should be able
+  // to see which one they marked from the map rather than only from the queue.
+  for (const o of state.orders) {
+    if (o.type !== 'demolishBuilding') continue;
+    const b = state.buildings.find((x) => x.id === o.buildingId);
+    if (b) for (const p of b.tiles) out.push({ q: p.q, r: p.r, kind: o.type });
+  }
   return out;
 }
 
@@ -304,7 +312,7 @@ export const ORDERS = {
       const t = tileAt(state, o.target.q, o.target.r);
       return t && isClearable(state, t) ? C.TERRAIN[t.terrain].yield : NO_COST;
     },
-    hands: (o) => (o.who === 'hand' ? 1 : 0),
+    hands: (o) => (isHand(o.who) ? 1 : 0),
     check: (state, o) => {
       const t = tileAt(state, o.target.q, o.target.r);
       if (!t) return no('off the map');
@@ -318,6 +326,9 @@ export const ORDERS = {
       const batch = state.crew.assignments.filter((a) => a.who === o.who && a.kind === 'clear');
       const a = place(state, o, events, {
         kind: 'clear', who: o.who, target: o.target, at: o.target, held,
+        // Carried onto the assignment so that standing the worker down later is
+        // recognisable as calling off the standing order that made it.
+        auto: o.auto,
         sameTripAs: batch.length ? Math.max(0, batch[0].arrivesOnTurn - state.turn) : undefined,
       });
       if (a && batch.length) levelBatch(state, [...batch, a]);
@@ -331,7 +342,7 @@ export const ORDERS = {
       return `man ${t ? C.TOWERS[t.towerIndex].name : b ? b.name : o.targetId}`;
     },
     cost: () => NO_COST,
-    hands: (o) => (o.who === 'hand' ? 1 : 0),
+    hands: (o) => (isHand(o.who) ? 1 : 0),
     check: (state, o) => {
       const target = state.towers.find((t) => t.id === o.targetId) || state.buildings.find((b) => b.id === o.targetId);
       if (!target) return no('gone');
@@ -346,7 +357,7 @@ export const ORDERS = {
   assignGarrison: {
     label: (o, state) => `station at ${tileLabel(state, o.target)}`,
     cost: () => NO_COST,
-    hands: (o) => (o.who === 'hand' ? 1 : 0),
+    hands: (o) => (isHand(o.who) ? 1 : 0),
     check: (state, o) => {
       const t = tileAt(state, o.target.q, o.target.r);
       if (!t || t.feature !== 'spring') return no('nothing to stand on');
@@ -376,7 +387,7 @@ export const ORDERS = {
       if (t.feature === 'cache') return { gold: C.FEATURES.cache.gold };
       return NO_COST;
     },
-    hands: (o) => (o.who === 'hand' ? 1 : 0),
+    hands: (o) => (isHand(o.who) ? 1 : 0),
     check: (state, o) => {
       const t = tileAt(state, o.target.q, o.target.r);
       if (!t) return no('off the map');
@@ -479,6 +490,31 @@ export const ORDERS = {
       events.push({ kind: 'towerMerging', id: tower.id, what: C.TOWERS[tower.towerIndex].name, tier: work.toTier, turns: work.turnsLeft });
       addLog(state, `${C.TOWERS[tower.towerIndex].name} at (${tower.q},${tower.r}) is being raised to tier ${work.toTier}`
         + ` — ${work.turnsLeft} turns, and it fires throughout`);
+    },
+  },
+
+  // The house equivalent of taking a gun down. Queued rather than instant, like
+  // every other thing done to a building: the crew have to walk out of it and
+  // the ground has to come free, and both belong to the resolve.
+  demolishBuilding: {
+    label: (o, state) => {
+      const b = state.buildings.find((x) => x.id === o.buildingId);
+      return `pull down ${b ? b.name : 'a building'}`;
+    },
+    cost: () => NO_COST,
+    gain: (state, o) => {
+      const b = state.buildings.find((x) => x.id === o.buildingId);
+      return b ? B.demolishRefund(b) : NO_COST;
+    },
+    check: (state, o) => B.canDemolish(state, state.buildings.find((x) => x.id === o.buildingId)),
+    apply: (state, o, events) => {
+      const b = state.buildings.find((x) => x.id === o.buildingId);
+      if (!b) return;
+      const name = b.name;
+      const refund = B.demolishBuilding(state, b);
+      events.push({ kind: 'demolished', what: name, q: b.q, r: b.r, refund });
+      addLog(state, `${name} at (${b.q},${b.r}) is pulled down — ${
+        Object.entries(refund).map(([k, v]) => `${v} ${k}`).join(', ')} back`);
     },
   },
 
@@ -833,8 +869,12 @@ export function projectedAssignments(state) {
 export function projectedCrew(state, held) {
   const taken = new Set(state.crew.assignments.map((a) => a.who));
   const byOrder = new Map();
+  // `'hand'` is the only token that means "whichever hand is nearest". An order
+  // that names a body — which auto-clear's do — is that body's, and the panel
+  // has to say so: `assign` resolves it the same way, and the two disagreeing
+  // put one man's name in the queue and sent another.
   const poolFor = (who) => state.crew.members.filter((m) => !taken.has(m.id)
-    && (isHand(who) ? m.kind === 'hand' : m.id === who));
+    && (who === 'hand' ? m.kind === 'hand' : m.id === who));
 
   // A labour officer's extra faces are the same body, not a second one. He is
   // spoken for the moment his first face is queued, so the register had nobody
@@ -1032,18 +1072,32 @@ function checkAgainstQueue(state, order) {
       const tower = state.towers.find((t) => t.id === order.targetId);
       const b = state.buildings.find((x) => x.id === order.targetId);
       const need = tower ? towerManning(state, tower).need : b ? handsNeededFor(state, b) : 0;
+      if (b && state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === b.id)) {
+        return no('it is queued to be pulled down');
+      }
       if (b && b.ruined) return no('a ruin has nothing to man');
       if (need <= 0) return no(b ? 'it runs on nobody' : 'it needs nobody');
       const on = projectedAssignments(state).filter((a) => a.kind === 'man' && a.target === order.targetId).length;
       return on < need ? ok : no(`${on}/${need} already on it`);
     }
     case 'upgradeCrew':
+      if (state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === order.buildingId)) {
+        return no('it is queued to be pulled down');
+      }
       return state.orders.some((o) => o.type === 'upgradeCrew' && o.buildingId === order.buildingId)
+        ? no('already queued') : ok;
+    // Nothing else is worth doing to a house that is coming down this turn, and
+    // pulling one down twice would pay for it twice.
+    case 'demolishBuilding':
+      return state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === order.buildingId)
         ? no('already queued') : ok;
     // One repair puts the whole building back, so a second is a second price for
     // nothing. The queue is where that is caught: the damage is still on the
     // building until the turn ends, so the check alone would let it through.
     case 'repairBuilding':
+      if (state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === order.buildingId)) {
+        return no('it is queued to be pulled down');
+      }
       return state.orders.some((o) => o.type === 'repairBuilding' && o.buildingId === order.buildingId)
         ? no('already queued') : ok;
     default:
@@ -1123,8 +1177,143 @@ export function enqueue(state, order) {
 
 export function revoke(state, id) {
   const i = state.orders.findIndex((o) => o.id === id);
-  if (i >= 0) state.orders.splice(i, 1);
+  if (i < 0) return;
+  const [gone] = state.orders.splice(i, 1);
+  // Taking back a job nobody asked for is how a player says they did not want it
+  // asked for. The standing order goes with it — otherwise the same tile is
+  // queued again at the top of the next turn and the only way out is to keep
+  // revoking it.
+  if (gone.auto && gone.who) stopAutoClear(state, gone.who, 'the order was taken back');
 }
+
+/**
+ * Turn one body's auto-clear off, and say so.
+ *
+ * The log line matters: a setting the player never touched has just changed
+ * itself, and a switch that moves without saying so is a bug as far as anyone
+ * watching is concerned.
+ */
+function stopAutoClear(state, who, why) {
+  if (!autoClearOn(state, who)) return;
+  setAutoClear(state, who, false);
+  addLog(state, `${crewName(state, who)} is off auto-clear — ${why}`);
+}
+
+/**
+ * Standing orders, run at the top of the player's turn.
+ *
+ * Anyone with auto-clear on and nothing to do takes the nearest tile that can be
+ * cut. Nearest by walk, not by crow's flight: the order is enqueued the way any
+ * other is, so it is refused for the same reasons — no way to walk there, the
+ * tile already spoken for — and the next candidate is tried instead.
+ *
+ * Orders, not assignments. What comes out of this is a queue the player can read
+ * and take back before the turn ends, which is the whole contract of the queue:
+ * nothing happens to the island that was not visible first.
+ *
+ * `only` narrows it to one body: the tick going on mid-turn is a standing order
+ * starting now rather than next turn, and a man standing about with the box
+ * ticked in front of the player is the plainest case there is. Narrow, because
+ * ticking one body should put that body to work and nobody else.
+ */
+export function autoClearOrders(state, only = null) {
+  const put = [];
+  // Labour officers pick first. The Pioneer wants a run of three touching faces
+  // of one ground; a hand who has taken the middle of the only such run leaves
+  // him nothing that shape, and he ends up on a single face while fourteen
+  // hands each hold one. Capacity descending, roster order within it.
+  const queue = [...state.crew.members]
+    .sort((a, b) => clearCapacity(state, b.id) - clearCapacity(state, a.id));
+  for (const m of queue) {
+    if (!m.autoClear || (only && m.id !== only)) continue;
+    if (projectedRoster(state).busy.has(m.id)) continue;
+    const mine = autoClearBatch(state, m);
+    for (const t of mine) put.push({ who: m.id, q: t.q, r: t.r });
+  }
+  if (put.length) {
+    const bodies = new Set(put.map((p) => p.who)).size;
+    addLog(state, only
+      ? `${crewName(state, only)} is on auto-clear, and clears the nearest `
+        + `${put.length === 1 ? 'tile' : `${put.length} tiles`}`
+      : `auto-clear puts ${bodies} of the crew back to work`);
+  }
+  return put;
+}
+
+/**
+ * One body's share of the frontier: the nearest face they can take, and — for a
+ * labour officer, who cuts several at once — the rest of a batch grown out from
+ * it.
+ *
+ * The batch is grown the way the queue would take it by hand — same ground,
+ * touching — because those are the rules `checkAgainstQueue` already holds an
+ * officer's faces to: one job at one rate, cut in step, paid for with one walk.
+ * Asking for anything else would only be refused. It is also what the map offers
+ * under the pointer, so auto-clear takes what could have been clicked and
+ * nothing more. If the blob runs out before his capacity does, he takes what
+ * there was: a thin frontier is a real answer.
+ */
+function autoClearBatch(state, m) {
+  const took = [];
+  const cap = clearCapacity(state, m.id);
+  const offer = (t) => {
+    const order = { type: 'assignClear', who: m.id, target: { q: t.q, r: t.r }, auto: true };
+    if (!canEnqueue(state, order).ok) return false;
+    return enqueue(state, order).ok;
+  };
+  // `workableTiles` drops what the queue has already taken, so neither this body
+  // nor the next is offered the same tile twice.
+  const pool = workableTiles(state).sort((a, b) => distance(m, a) - distance(m, b));
+  for (const t of bestBatch(pool, cap)) {
+    if (offer(t)) took.push(t);
+  }
+  // The plan was drawn before any of it was queued, so a tile can still be
+  // refused under him — a body walking to it, a face taken in the same pass. A
+  // worker with nothing is worse than a worker with the wrong tile: try the
+  // rest of the frontier for anything at all.
+  if (!took.length) {
+    for (const t of pool.slice(0, AUTO_CLEAR_TRIES)) {
+      if (offer(t)) { took.push(t); break; }
+    }
+  }
+  return took;
+}
+
+/**
+ * The nearest run of faces one body could take in a single batch.
+ *
+ * The seed is not simply the nearest tile. A nearest tile with nothing of its
+ * own kind beside it is a batch of one, and the Master Pioneer standing on one
+ * face is two thirds of him wasted — so each of the nearest few is tried as a
+ * seed, the blob it could grow is measured, and the first that fills his
+ * capacity wins. Nothing fills it: the largest blob going is taken instead,
+ * which is the honest answer on a frontier that has no run of three in it.
+ *
+ * Measured before anything is queued, so this is a plan rather than a sequence
+ * of orders — cheap to throw away, and cheap to try a dozen of.
+ */
+function bestBatch(pool, cap) {
+  if (cap <= 1) return pool.slice(0, 1);
+  let best = [];
+  for (const seed of pool.slice(0, AUTO_CLEAR_TRIES)) {
+    const blob = [seed];
+    while (blob.length < cap) {
+      // `pool` is sorted nearest-first, so this takes the nearest legal face
+      const next = pool.find((t) => !blob.includes(t) && t.terrain === seed.terrain
+        && blob.some((b) => distance(b, t) === 1));
+      if (!next) break;
+      blob.push(next);
+    }
+    if (blob.length > best.length) best = blob;
+    if (best.length >= cap) break;
+  }
+  return best;
+}
+
+// How many of the nearest faces are tried before a body is left standing. The
+// frontier is sorted by distance, so the first is nearly always the one; the
+// rest are for the case where the closest few are unreachable or taken.
+const AUTO_CLEAR_TRIES = 12;
 
 // ---- standing down ---------------------------------------------------------
 // The other thing that is not an order. The queue exists to hold back what
@@ -1152,6 +1341,9 @@ export function standDown(state, assignmentId) {
   // The one job that cannot be called off: the team is away over the island
   // with the powder, and there is nobody here to stand down.
   if (a.kind === 'assault') return no('away on a sabotage mission');
+  // Same as revoking the order it came from: taking a body off work nobody
+  // asked for is the player saying to stop putting them on it.
+  if (a.auto) stopAutoClear(state, a.who, 'the work was called off');
   dropAssignment(state, a.id);
   recomputeCapBonus(state);
   addLog(state, `${crewName(state, a.who)} stands down`);

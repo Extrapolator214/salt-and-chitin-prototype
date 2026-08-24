@@ -493,7 +493,7 @@ export function recomputeCapBonus(state) {
  * A job nobody can walk to is refused rather than taken by somebody who then
  * marches over standing forest to reach it.
  */
-export function assign(state, { kind, who, target, at, sameTripAs, held }) {
+export function assign(state, { kind, who, target, at, sameTripAs, held, auto }) {
   // An officer is not on the idle list once he has a job, and his extra faces
   // are jobs he takes while holding it — so he is fetched by name when the idle
   // list has nobody. Refusing that outright was the whole Master Pioneer batch
@@ -520,6 +520,8 @@ export function assign(state, { kind, who, target, at, sameTripAs, held }) {
     leftOn: state.turn,
     arrivesOnTurn: state.turn + turns,
   };
+  // Only when it is one, so every other assignment is the same shape it was.
+  if (auto) a.auto = true;
   state.crew.assignments.push(a);
   return a;
 }
