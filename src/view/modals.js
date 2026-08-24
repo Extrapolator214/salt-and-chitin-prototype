@@ -690,15 +690,23 @@ const VIEWS = {
 
   assault(state) {
     let h = `<h2>Bug Sabotage mission</h2><p class="note">A spawner can only be destroyed by a sabotage team. ` +
-      `${A.assaultHands(state)} hands, ${C.MARCH_TURNS} turns out. Nobody dies; failure costs ${A.downtimeTurns(state)} turns of downtime.</p>`;
-    h += '<table><tr><th>target</th><th>road path</th><th>leader</th><th>success</th><th></th><th></th></tr>';
+      `${C.ASSAULT_HANDS} hands, ${C.MARCH_TURNS} turns out. Nobody dies; failure costs ${A.downtimeTurns(state)} turns of downtime. ` +
+      `Who leads it is the whole of it: the Sapper Captain goes at ${Math.round(C.SUCCESS_CAPTAIN * 100)}% with a team of ` +
+      `${C.ASSAULT_HANDS_CAPTAIN}, another lieutenant at ${Math.round(C.SUCCESS_NAMED * 100)}%, and a team with nobody over it ` +
+      `at ${Math.round(C.SUCCESS_GENERIC * 100)}%.</p>`;
+    h += '<table><tr><th>target</th><th>road path</th><th>leader</th><th>success</th><th>team</th><th></th><th></th></tr>';
     for (const sp of state.spawners.filter((x) => x.alive)) {
       for (const leader of [null, ...state.crew.officers.map((o) => o.id)]) {
         const order = { type: 'scheduleAssault', spawnerId: sp.id, leader };
         const can = O.canEnqueue(state, order);
         const name = leader ? state.crew.officers.find((o) => o.id === leader).name : 'nobody';
+        // The team is quoted per row, not once above the table: the Captain
+        // brings it down to two, and only on the row where he is the one going.
+        const hands = A.assaultHands(state, leader) - (leader ? 1 : 0);
         h += row([`${sp.name} (${sp.q}, ${sp.r})`, roadWord(state, sp), name,
-          `${Math.round(A.successChance(state, leader) * 100)}%`, btn('Send', 'orderClose', order, !can.ok)],
+          `${Math.round(A.successChance(state, leader) * 100)}%`,
+          `${hands} hand${hands === 1 ? '' : 's'}${leader ? ' + him' : ''}`,
+          btn('Send', 'orderClose', order, !can.ok)],
         !can.ok, can.ok ? '' : can.why);
       }
     }

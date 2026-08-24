@@ -489,7 +489,7 @@ function policy(s, k, m) {
       const lead = leader || ['item', 'assault', 'man', 'clear']
         .map((role) => idleOfficer(s, role))
         .find((o) => o && o.quality >= 1) || null;
-      const need = A.assaultHands(s) - (lead ? 1 : 0) - St.idleHands(s);
+      const need = A.assaultHands(s, lead ? lead.id : null) - (lead ? 1 : 0) - St.idleHands(s);
       for (let i = 0; i < need; i++) {
         const digger = s.crew.assignments.find((a) => a.kind === 'clear' && St.isHand(a.who));
         if (!digger) break;

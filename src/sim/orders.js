@@ -641,7 +641,7 @@ export const ORDERS = {
   scheduleAssault: {
     label: (o) => 'send a Bug Sabotage mission',
     cost: () => NO_COST,
-    hands: (o, state) => (state ? A.assaultHands(state) : C.ASSAULT_HANDS) - (o.leader ? 1 : 0),
+    hands: (o, state) => (state ? A.assaultHands(state, o.leader) : C.ASSAULT_HANDS) - (o.leader ? 1 : 0),
     check: (state, o) => A.canSchedule(state, o.spawnerId, o.leader),
     apply: (state, o, events) => {
       const a = A.schedule(state, o.spawnerId, o.leader);

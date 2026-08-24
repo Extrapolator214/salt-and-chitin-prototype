@@ -2725,7 +2725,7 @@ function scriptedWin(seed) {
       if (!networkReaches(s, sp)) { driveRoadGang(s, sp, 6, 0); continue; }
       if (s.assaults.some((a) => a.targetSpawnerId === sp.id)) continue;
       if (O.enqueue(s, { type: 'scheduleAssault', spawnerId: sp.id, leader: 'builder' }).ok) continue;
-      const need = A.assaultHands(s) - 1 - St.idleHands(s);
+      const need = A.assaultHands(s, 'builder') - 1 - St.idleHands(s);
       for (let i = 0; i < need; i++) {
         // instant, so the body is off the list the moment it is freed
         const digger = s.crew.assignments.find((a) => a.kind === 'clear' && St.isHand(a.who));

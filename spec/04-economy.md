@@ -173,15 +173,17 @@ Requirements:
 1. A built and manned **Sappers' Camp**.
 2. **A continuous road or bridge path** from the base to a tile adjacent to the
    target spawner.
-3. **4 hands**, optionally led by one of the three officers.
+3. **4 hands**, optionally led by an officer — **2 hands** under the Sapper
+   Captain, whose trade this is, and only when he is the one going.
 
 Scheduling is a player-phase order; resolution happens in the resolve phase and
 opens a modal.
 
-| leader | success |
-|---|---:|
-| a named officer | **80%** |
-| nobody | **40%** |
+| leader | success | team |
+|---|---:|---:|
+| the Sapper Captain | **90%** | 2 hands |
+| any other unique lieutenant | **65%** | 4 hands |
+| nobody, or a pirate off the island | **40%** | 4 hands |
 
 - March: **10 turns** out. The team is unavailable for the whole march.
 - Success: the spawner dies. Its accumulating cohort is released and advances that

@@ -183,7 +183,10 @@ function refresh() {
   renderLog(state, logEl);
   modals.renderModal(state, modalEl, backdrop, ui);
   renderReelPanel();
-  document.getElementById('endturn').disabled = state.phase !== 'player';
+  // The whole row, not only End Turn: while the resolve is being shown there is
+  // nothing on it that can be acted on, and a live-looking button that quietly
+  // does nothing is worse than one that says it is out of reach.
+  document.querySelectorAll('#actions button').forEach((b) => { b.disabled = handsOff(); });
 
   const spare = O.projectedHands(state) + O.projectedIdleOfficers(state).length;
   const bodies = St.crewCount(state);
@@ -276,9 +279,22 @@ function endTurn(confirmed = false) {
  */
 function afterReel() {
   endReel();
-  if (state.combat) { renderStrip(); refresh(); return; } // the ticker takes over
+  if (state.combat) {
+    // The pace is the player's standing choice, not a decision about this
+    // cohort: whoever watched the last fight at 3x is not asking to be put back
+    // to 1x for the next one. The sim opens every contact at 1x — it knows
+    // nothing about who is watching — so the setting is applied here, where the
+    // fight reaches the screen.
+    state.combat.speed = contactSpeed();
+    renderStrip();
+    refresh();
+    return;                                              // the ticker takes over
+  }
   finishTurn();
 }
+
+/** The remembered contact pace, and a guard on whatever storage handed back. */
+const contactSpeed = () => (Number(ui.prefs.contactSpeed) === 3 ? 3 : 1);
 
 // ---- the resolve reel ------------------------------------------------------
 
@@ -453,8 +469,11 @@ function renderStrip() {
 
 function setSpeed(s) {
   if (!state.combat) return;
+  // Skipping is a thing done to this fight, not a pace to be remembered — the
+  // next contact is not asking to be skipped because this one was.
   if (s === 'skip') { combat.skip(state); return; }
   state.combat.speed = Number(s);
+  ui.setPref('contactSpeed', state.combat.speed);
 }
 
 // ---- the frame loop --------------------------------------------------------
@@ -489,6 +508,21 @@ requestAnimationFrame(frame);
 
 // ---- input -----------------------------------------------------------------
 
+/**
+ * Whether the resolve has the floor.
+ *
+ * Between End Turn and the next player phase the run is being *shown*, not
+ * played: the reel is running, or a cohort is on the road being fought. Orders
+ * given in that window would be given to a state the player cannot see the
+ * whole of — the queue has already been applied, the ground has already moved —
+ * so the map stops taking clicks and the action row goes dark for the duration.
+ *
+ * Looking is not touching. Panning, zooming and hovering all stay live: a fight
+ * is the one time a player most wants to move the camera, and moving it changes
+ * nothing about the run.
+ */
+const handsOff = () => !!ui.reel || state.phase !== 'player';
+
 let dragging = false, dragged = false, lastX = 0, lastY = 0;
 
 canvas.addEventListener('mousedown', (e) => {
@@ -500,7 +534,7 @@ canvas.addEventListener('mousedown', (e) => {
 window.addEventListener('mouseup', (e) => {
   if (!dragging) return;
   dragging = false;
-  if (dragged || e.target !== canvas) return;
+  if (dragged || e.target !== canvas || handsOff()) return;
   ui.located = null;                   // a click is the end of looking for it
   const h = screenToAxial(cam, canvas, e.offsetX, e.offsetY);
   if (e.shiftKey) assignClearAt(h);
@@ -526,6 +560,7 @@ canvas.addEventListener('mouseleave', () => { ui.hover = null; renderHover(state
 
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
+  if (handsOff()) return;
   assignClearAt(screenToAxial(cam, canvas, e.offsetX, e.offsetY));
 });
 
@@ -586,7 +621,7 @@ hudEl.addEventListener('click', (e) => {
 });
 
 document.getElementById('actions').addEventListener('click', (e) => {
-  if (ui.reel) return;                 // nothing on the row acts mid-resolve
+  if (handsOff()) return;              // nothing on the row acts mid-resolve
   const action = e.target.dataset && e.target.dataset.action;
   if (!action) return;
   ui.placing = null;

@@ -1128,6 +1128,45 @@ function drawBatchGlow(ctx, state, cam, canvas, S) {
 }
 
 /**
+ * A building's reach, and the yards inside it.
+ *
+ * One drawing, two callers: the plot under the cursor while a Bunkhouse is
+ * being placed, and the Bunkhouse already standing under the pointer. They must
+ * look the same — the promise made while placing it and the account given of it
+ * afterwards are the same claim, and a player who cannot recognise one as the
+ * other has to take both on trust.
+ */
+function paintCoverage(ctx, cam, canvas, S, cover, covered) {
+  if (!cover) return;
+  ctx.save();
+  // Filled and lightly outlined hex by hex. The outline is what makes the blob
+  // read as a region rather than as a wash — over pale sand the fill alone is
+  // nearly the same colour as the ground it covers.
+  ctx.fillStyle = 'rgba(120, 190, 240, 0.20)';
+  ctx.strokeStyle = 'rgba(140, 200, 245, 0.28)';
+  ctx.lineWidth = 1;
+  for (const k of cover) {
+    const { q, r } = parseKey(k);
+    const c = axialToScreen(cam, canvas, q, r);
+    ctx.beginPath();
+    hexPath(ctx, c.x, c.y, S);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(150, 210, 255, 0.9)';
+  ctx.lineWidth = 2;
+  for (const b of covered) {
+    for (const t of b.tiles) {
+      const c = axialToScreen(cam, canvas, t.q, t.r);
+      ctx.beginPath();
+      hexPath(ctx, c.x, c.y, S * 0.9);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/**
  * The structure being placed, following the cursor — a yard or a gun, since a
  * tower is placed exactly as a building is now: picked off a panel in the bar,
  * carried over the map, put down with a click.
@@ -1160,34 +1199,7 @@ function drawPlacement(ctx, state, cam, canvas, S, ui) {
   // silhouette: it is the ground the effect covers, not part of the plot.
   const cover = tower ? null : coverageOf(state, ui.placing.type, tiles);
   const covered = coveredBuildings(state, cover);
-  if (cover) {
-    ctx.save();
-    // Filled and lightly outlined hex by hex. The outline is what makes the
-    // blob read as a region rather than as a wash — over pale sand the fill
-    // alone is nearly the same colour as the ground it covers.
-    ctx.fillStyle = 'rgba(120, 190, 240, 0.20)';
-    ctx.strokeStyle = 'rgba(140, 200, 245, 0.28)';
-    ctx.lineWidth = 1;
-    for (const k of cover) {
-      const [cq, cr] = k.split(',').map(Number);
-      const c = axialToScreen(cam, canvas, cq, cr);
-      ctx.beginPath();
-      hexPath(ctx, c.x, c.y, S);
-      ctx.fill();
-      ctx.stroke();
-    }
-    ctx.strokeStyle = 'rgba(150, 210, 255, 0.9)';
-    ctx.lineWidth = 2;
-    for (const b of covered) {
-      for (const t of b.tiles) {
-        const c = axialToScreen(cam, canvas, t.q, t.r);
-        ctx.beginPath();
-        hexPath(ctx, c.x, c.y, S * 0.9);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
+  paintCoverage(ctx, cam, canvas, S, cover, covered);
 
   for (const t of tiles) {
     const p = axialToScreen(cam, canvas, t.q, t.r);
@@ -1256,6 +1268,16 @@ function drawHighlights(ctx, state, cam, canvas, S, ui) {
   if (!h) return;
   const t = tileAt(state, h.q, h.r);
   if (!t) return;
+
+  // The Bunkhouse is placed for ground it does not stand on, so the only way to
+  // check one afterwards is to hover it — the same blob and the same ringed
+  // yards the cursor carried while it was being put down. Under the hover
+  // outline, so the tile the pointer is actually on still reads clearly.
+  if (t.occupant && t.occupant.kind === 'building') {
+    const b = state.buildings.find((x) => x.id === t.occupant.id);
+    const cover = b && C.buildingRadius(b.type) ? coverageOf(state, b.type, b.tiles) : null;
+    if (cover) paintCoverage(ctx, cam, canvas, S, cover, coveredBuildings(state, cover));
+  }
 
   const p = axialToScreen(cam, canvas, h.q, h.r);
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';

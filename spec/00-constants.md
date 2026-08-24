@@ -296,7 +296,7 @@ building that wants two takes two, and the third order is refused.
 | Powder Store | 2 | 3 | flare cost −25%, lands in 1 turn |
 | Excavation Camp | 3 | 4 | works one treasure cache; 100 gold over 10 turns |
 | Bunkhouse | 2 | 3 | buildings within radius 3 cost 1 hand |
-| Palisade | — | 1 | the enemy will not cross it; no crew |
+| Palisade | — | 1 | the enemy will not cross it; no crew · **45 wood + 30 stone**, a third of the flat price |
 
 Excavation Camp, Bunkhouse and Palisade are repeatable; the rest are one each.
 
@@ -330,9 +330,10 @@ they stand.
 
 | constant | value |
 |---|---|
-| `ASSAULT_HANDS` | 4 (2 with a Sapper Captain — not in this build) |
-| `SUCCESS_NAMED` | 0.80 — led by one of the three officers |
-| `SUCCESS_GENERIC` | 0.40 — led by nobody |
+| `ASSAULT_HANDS` | 4 — **2 when the Sapper Captain is the one leading it**, and only then |
+| `SUCCESS_CAPTAIN` | 0.90 — led by the Sapper Captain, whose trade it is |
+| `SUCCESS_NAMED` | 0.65 — led by any other unique lieutenant |
+| `SUCCESS_GENERIC` | 0.40 — led by nobody, or by a pirate off the island |
 | `MARCH_TURNS` | 10 |
 | `DOWNTIME_TURNS` | 3 (1 with a Hospital) |
 | `EXCLUSION_RADIUS` | 7 tiles — no tower may be built within this of a spawner |
@@ -413,7 +414,10 @@ Three, all available from turn 1, all assignable to any manning slot.
 | **Master Gunner** | mans one tower alone and gives it +50% power | a job |
 
 A passive trade applies because the officer is in the company; it is shown as
-`(passive)` beside the verb.
+`(passive)` beside the verb. Only the Weapons Master's is one — the Pioneer has
+to be sent to cut, the Gunner has to be stood in a tower, and the Sapper Captain
+has to go with the charges, so his 90% and his team of two are both his only
+while he is leading the mission.
 
 An officer **replaces a hand one for one** and gives their bonus only in their
 own role. The 4th officer, from the map site, is a randomised copy of one of the

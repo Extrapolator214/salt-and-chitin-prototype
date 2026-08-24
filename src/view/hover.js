@@ -8,6 +8,7 @@ import {
   isBuildable, isOpenGround, isPassable,
 } from '../sim/state.js';
 import { cohortTiles, cohortHidden, advanceCost } from '../sim/enemy.js';
+import { coverageOf, coveredBuildings } from '../sim/build.js';
 
 const yn = (v) => (v ? 'yes' : 'no');
 
@@ -118,8 +119,30 @@ function buildingBlock(state, id) {
     ...(b.type === 'excavation' ? ['dig', `${b.progress}/${C.EXCAVATION_TURNS} turns`] : []));
   s += row('owns', def.owns);
   s += row('effect', def.effect);
+  // A Bunkhouse is the one building whose worth is somewhere other than where it
+  // stands, so hovering it has to answer "which yards is this one actually
+  // paying for" — the question you asked when you placed it and cannot ask
+  // again afterwards. The reach itself is drawn on the map at the same time.
+  const radius = C.buildingRadius(b.type);
+  if (radius) {
+    const covered = coveredBuildings(state, coverageOf(state, b.type, b.tiles));
+    // Short labels on purpose: the panel is one line wide and `takes in 3 yards`
+    // was the pair that spilled onto a second one.
+    s += pair('reach', `${radius} tiles`, 'yards in it', String(covered.length));
+    if (!covered.length) s += row('', 'nothing within reach of it yet');
+    for (const c of covered.slice(0, COVER_LIST)) {
+      s += row('', `${c.name}${c.id === b.id ? ' (itself)' : ''} (${c.q},${c.r})`
+        + `${c.complete ? '' : ' — building'}`);
+    }
+    if (covered.length > COVER_LIST) s += row('', `and ${covered.length - COVER_LIST} more`);
+    if (!b.complete) s += row('', 'it takes nobody off anything until it stands');
+  }
   return s;
 }
+
+// How many of the yards a Bunkhouse covers are named before the panel gives up
+// and counts the rest. Enough for every yard a sane plot takes in.
+const COVER_LIST = 6;
 
 function spawnerBlock(state, id) {
   const sp = state.spawners.find((x) => x.id === id);

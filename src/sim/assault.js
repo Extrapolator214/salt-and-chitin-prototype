@@ -1,7 +1,7 @@
 // Assault scheduling and resolution. Spawners die only this way.
 
 import C from './config.js';
-import { addLog, nextId, draw, hasBuilding, idleHands, idleOfficers, officerById, officerFor } from './state.js';
+import { addLog, nextId, draw, hasBuilding, idleHands, idleOfficers, officerById } from './state.js';
 import { assign } from './labour.js';
 import { networkReaches, killSpawner } from './enemy.js';
 
@@ -10,20 +10,35 @@ const ok = { ok: true };
 
 export const downtimeTurns = (state) => (hasBuilding(state, 'hospital') ? C.DOWNTIME_HOSPITAL : C.DOWNTIME_TURNS);
 
+/** The man whose trade this is, if he is the one going. */
+const captainLeading = (state, leaderId) => {
+  const officer = leaderId ? officerById(state, leaderId) : null;
+  return !!officer && officer.role === 'assault' && officer.quality >= 1;
+};
+
 /**
- * A unique lieutenant places the charges at 80%. A pirate off the island, or
- * nobody at all, manages the generic 40% — which is the campaign's whole
- * progression lever, so it is deliberately a wide gap.
+ * A unique lieutenant places the charges at 65%, and the Sapper Captain — whose
+ * trade it is — at 90%. A pirate off the island, or nobody at all, manages the
+ * generic 40%, which is the campaign's whole progression lever.
+ *
+ * Every one of these is about who is *going*, not who is on the roster: the
+ * charges are carried by hand, and a captain left at the ship has not placed
+ * anything.
  */
 export function successChance(state, leaderId) {
   const officer = leaderId ? officerById(state, leaderId) : null;
-  return officer && officer.quality >= 1 ? C.SUCCESS_NAMED : C.SUCCESS_GENERIC;
+  if (!officer || officer.quality < 1) return C.SUCCESS_GENERIC;
+  return captainLeading(state, leaderId) ? C.SUCCESS_CAPTAIN : C.SUCCESS_NAMED;
 }
 
-/** A Sapper Captain in the company raises teams of 2 instead of 4. */
-export function assaultHands(state) {
-  const captain = officerFor(state, 'assault');
-  return captain && captain.quality >= 1 ? C.ASSAULT_HANDS_CAPTAIN : C.ASSAULT_HANDS;
+/**
+ * The size of the team, which is also the Captain's doing and also only when he
+ * leads it: two hands under him where anyone else takes four. He used to shrink
+ * every team in the run from wherever he happened to be standing, which made a
+ * man whose whole trade is going on the mission worth having without going.
+ */
+export function assaultHands(state, leaderId) {
+  return captainLeading(state, leaderId) ? C.ASSAULT_HANDS_CAPTAIN : C.ASSAULT_HANDS;
 }
 
 export function canSchedule(state, spawnerId, leaderId) {
@@ -32,7 +47,7 @@ export function canSchedule(state, spawnerId, leaderId) {
   if (!hasBuilding(state, 'sappers')) return no("needs a manned Sappers' Camp");
   if (state.assaults.some((a) => a.targetSpawnerId === spawnerId && a.state !== 'done')) return no('already under way');
   if (!networkReaches(state, sp)) return no('no open ground reaches it');
-  const need = assaultHands(state) - (leaderId ? 1 : 0);
+  const need = assaultHands(state, leaderId) - (leaderId ? 1 : 0);
   if (idleHands(state) < need) return no(`needs ${need} idle hands`);
   if (leaderId && !idleOfficers(state).some((o) => o.id === leaderId)) return no('that officer is busy');
   return ok;
@@ -43,7 +58,7 @@ export function schedule(state, spawnerId, leaderId) {
     id: nextId(state, 'at'),
     targetSpawnerId: spawnerId,
     leader: leaderId || null,
-    hands: assaultHands(state) - (leaderId ? 1 : 0),
+    hands: assaultHands(state, leaderId) - (leaderId ? 1 : 0),
     turnsRemaining: C.MARCH_TURNS,
     state: 'march',
   };

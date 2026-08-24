@@ -410,13 +410,20 @@ const C = {
     { type: 'powder', name: 'Powder Store', tiles: 3, cost: { wood: 100, stone: 70 }, owns: 'the flare', effect: 'flare cost -25%, lands in 1 turn', repeatable: false },
     { type: 'excavation', name: 'Excavation Camp', tiles: 4, cost: { wood: 100, stone: 60 }, owns: 'buried gold', effect: 'works one cache: 220 gold over 10 turns', repeatable: true },
     { type: 'bunkhouse', name: 'Bunkhouse', tiles: 3, cost: { wood: 50, stone: 40 }, owns: 'manning', effect: 'buildings within radius 3 cost 1 hand', repeatable: true },
-    // Not an economy at all: one tile of ground the enemy will not cross, dear
-    // enough that a line of them is a plan rather than a habit. It is exempt
-    // from both rules below — a palisade that needed a road beside it and could
-    // not touch its neighbour would not be a wall.
+    // Not an economy at all: one tile of ground the enemy will not cross. It is
+    // exempt from both rules below — a palisade that needed a road beside it and
+    // could not touch its neighbour would not be a wall.
+    //
+    // A third of what it used to be. At 140 wood and 90 stone a single tile of
+    // wall cost more than a Bunkhouse and nearly as much as a Trading Dock, so
+    // the price was not "a line of them is a plan rather than a habit" — it was
+    // "nobody builds one". A wall is only worth having by the half dozen, and
+    // the thing that should stop a player walling the island in is the labour
+    // and the ground it takes, not a price that rules out the first one.
+    //
     // `blocksCrew` is what makes it a wall and not a yard: the crew walk through
     // the ship and through their own workshops, and stop at this.
-    { type: 'wall', name: 'Palisade', tiles: 1, cost: { wood: 140, stone: 90 }, crew: 0, economic: false, blocksCrew: true, owns: 'the ground', effect: 'the enemy will not cross it; needs no crew', repeatable: true },
+    { type: 'wall', name: 'Palisade', tiles: 1, cost: { wood: 45, stone: 30 }, crew: 0, economic: false, blocksCrew: true, owns: 'the ground', effect: 'the enemy will not cross it; needs no crew', repeatable: true },
   ],
   // An economic building is a yard on your supply line, not a shed in the
   // woods: it must have road joined to the ship beside it, and it must stand
@@ -471,7 +478,13 @@ const C = {
 
   // 10 · Assaults
   ASSAULT_HANDS: 4,
-  SUCCESS_NAMED: 0.80,
+  // Who is holding the charges. A unique lieutenant is a two-thirds job; the
+  // Sapper Captain is the man whose trade this is and is nearly sure of it; a
+  // pirate off the island, or a team with nobody over it, manages the generic
+  // rate — which is the campaign's whole progression lever, so the gap between
+  // the ends of it is deliberately wide.
+  SUCCESS_NAMED: 0.65,
+  SUCCESS_CAPTAIN: 0.90,
   SUCCESS_GENERIC: 0.40,
   MARCH_TURNS: 32,
   DOWNTIME_TURNS: 3,
@@ -544,14 +557,18 @@ const C = {
     { id: 'builder', name: 'Master Pioneer', verb: 'clears 3 tiles a turn by himself', role: 'clear' },
     { id: 'weapons', name: 'Weapons Master', verb: 'items cost 25% less', role: 'item' },
     { id: 'gunner', name: 'Master Gunner', verb: 'mans one tower alone, +50% power', role: 'man' },
-    { id: 'sapper', name: 'Sapper Captain', verb: 'sabotage teams need 2 hands, not 4', role: 'assault' },
+    // Not a trade that works from the roster: the charges are his job, so he has
+    // to be the one going. Leading, he is 90% where another lieutenant is 65%,
+    // and the team he leads is two hands rather than four.
+    { id: 'sapper', name: 'Sapper Captain', verb: 'leads a sabotage team: 90%, and 2 hands rather than 4', role: 'assault' },
   ],
-  // Two of the four work from the roster: the Weapons Master's discount and the
-  // Sapper Captain's smaller teams apply because the man is in the company, not
-  // because he was put on a job. The other two are jobs — the Pioneer has to be
-  // sent to cut, the Gunner has to be stood in a tower — and the difference is
-  // worth saying on the line the player reads before deciding where he goes.
-  PASSIVE_ROLES: ['item', 'assault'],
+  // One of the four works from the roster: the Weapons Master's discount applies
+  // because the man is in the company, not because he was put on a job. The
+  // other three are jobs — the Pioneer has to be sent to cut, the Gunner has to
+  // be stood in a tower, the Sapper Captain has to go with the charges — and the
+  // difference is worth saying on the line the player reads before deciding
+  // where he goes.
+  PASSIVE_ROLES: ['item'],
   PIRATE_QUALITY: 0.55, // a random officer is worth this much of a unique
   PIRATE_NAMES: ['Rattlejack', 'Sil the Quiet', 'Bosun Crane', 'Mad Perrott', 'One-Eye Tace', 'Gallows Ryn'],
   // The hands. Nobody signs the articles under their own name, and most of
@@ -613,12 +630,22 @@ C.turnsToClear = (terrain) => (C.TERRAIN[terrain] && C.TERRAIN[terrain].turns) |
 /** Does this officer's trade work from the roster rather than from a job? */
 C.isPassiveRole = (role) => C.PASSIVE_ROLES.includes(role);
 /**
- * What an officer does, as it is shown. Built here rather than written into the
- * verbs so that the pirate — whose verb is a sentence about a lieutenant's —
- * is marked the same way, and so a run saved before the mark was added shows it
- * too: the verb is stored, the mark is not.
+ * What an officer does, as it is shown.
+ *
+ * Read off the table by id rather than out of the run, and marked here rather
+ * than in the verbs. A run stores its officers' verbs as they read on the day it
+ * was started, so a run in progress would otherwise go on quoting whatever the
+ * trade used to do long after it changed — which is exactly what happened when
+ * the Sapper Captain stopped shrinking teams from the roster. The pirate is the
+ * one who keeps his own: his verb is a sentence written when he joined, about a
+ * lieutenant's trade and about his being a lesser copy of it.
  */
-C.officerVerb = (o) => (o && C.isPassiveRole(o.role) ? `${o.verb} (passive)` : (o ? o.verb : ''));
+C.officerVerb = (o) => {
+  if (!o) return '';
+  const def = C.OFFICERS.find((d) => d.id === o.id);
+  const verb = def ? def.verb : o.verb;
+  return C.isPassiveRole(o.role) ? `${verb} (passive)` : verb;
+};
 C.buildingDef = (type) => C.BUILDINGS.find((b) => b.type === type);
 /** The fixed shape of a building of n tiles: axial offsets from its anchor. */
 C.buildingShape = (n) => C.BUILDING_SHAPES[n] || C.BUILDING_SHAPES[1];

@@ -564,12 +564,14 @@ Four unique lieutenants sail with the run, and a fifth is found on the island:
 | Master Pioneer | clears 3 tiles a turn unaided | a job: he has to be sent to cut |
 | Weapons Master | items cost 25% less | **passive** — from the roster |
 | Master Gunner | mans one tower alone, +50% power | a job: he has to stand in the tower |
-| Sapper Captain | assault teams need 2 hands, not 4 | **passive** — from the roster |
+| Sapper Captain | leads a sabotage team: 90%, and 2 hands rather than 4 | a job: he has to go with the charges |
 
-Two of the four work whether or not they are given anything to do, and the
+Only the Weapons Master works whether or not he is given anything to do, and the
 interface says so: `C.officerVerb` marks a passive trade `(passive)` wherever a
 verb is shown, rather than the mark being written into the verbs — so the pirate
-copy of a passive trade carries it too.
+copy of a passive trade carries it too. The Sapper Captain's used to be two
+roster-wide effects, which made a man whose whole trade is going on the mission
+worth having without going; both now hang on him leading it.
 
 The Sapper Captain is the fourth because `00-constants.md` §10 already names him
 ("2 with a Sapper Captain — not in this build"). The other candidates from the
@@ -579,9 +581,10 @@ him out is a one-line change to `C.OFFICERS`.
 The **officer site** yields a random pirate, not a fifth lieutenant: he takes a
 random one of those four trades at `PIRATE_QUALITY` 0.55 — two tiles a turn
 instead of three, +27% on a gun instead of +50%, no manning a tower alone — and
-he leads an assault at the generic **40%**, never a lieutenant's 80%. The design
-fixes his quality at 0.55 and his assault rate at 40% but says nothing about how
-his verb scales; scaling it linearly by quality is this build's invention.
+he leads an assault at the generic **40%**, never a lieutenant's 65% and never
+the Sapper Captain's 90%. The design fixes his quality at 0.55 and his assault
+rate at 40% but says nothing about how his verb scales; scaling it linearly by
+quality is this build's invention.
 
 ### Calibrated values
 
@@ -1050,8 +1053,9 @@ so adding a building moves neither silently.
 | Tinker's Shed | 4 | 130w 90s | | Hospital | 3 | 90w 60s |
 | | | | | Bunkhouse | 3 | 50w 40s |
 
-(The Palisade is a twelfth building and not one of the eleven: 1 tile, 140w 90s,
-and no part of the economy.)
+(The Palisade is a twelfth building and not one of the eleven: 1 tile, 45w 30s,
+and no part of the economy. It was 140w 90s — dearer than a Bunkhouse for one
+tile of wall, which priced the first one out rather than the tenth.)
 
 **Every resolve now ends with a modal**, not only the eventful ones. A quiet
 turn says so — "a quiet turn — nothing came of it" — and then reports what is
