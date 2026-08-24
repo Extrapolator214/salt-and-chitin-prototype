@@ -2,9 +2,11 @@
 // It plays the game through the same order queue a human uses, and tries to
 // win — both spawners dead before turn 300.
 //
-//   node tests/play.mjs                 # 6 seeds, summary
-//   node tests/play.mjs --seeds 12      # more seeds
-//   node tests/play.mjs --trace 20260816  # turn-by-turn journal for one seed
+//   node tests/play.mjs                    # 6 seeds, the reference policy
+//   node tests/play.mjs --seeds 12         # more seeds
+//   node tests/play.mjs --compare          # every strategy over the same seeds
+//   node tests/play.mjs --strategy tiers   # one of them on its own
+//   node tests/play.mjs --trace 20260816   # turn-by-turn journal for one seed
 
 import C from '../src/sim/config.js';
 import * as H from '../src/sim/hex.js';
@@ -302,6 +304,58 @@ const DEFAULTS = {
   goldReserve: 0,      // gold held back from the unmanning upgrade
   repairBelow: 70,
   repairReserve: 250,  // wood kept back when repairing
+  // Knobs the specialised strategies below turn on. All off by default, so the
+  // reference policy is exactly what it was.
+  tierFirst: false,    // merge every stack up rather than saving tier-1s for new guns
+  powderEarly: false,  // the Powder Store in act 1, before the gun line
+  flareFirst: false,   // never spend wood the next flare is going to need
+  mineIron: false,     // cut the iron seams first, wherever they are on the frontier
+  poiFirst: false,     // cut the ground over chests and wrecks first
+  features: 3,         // bodies sent to work a point of interest in one turn
+};
+
+/**
+ * Five ways to play the same game.
+ *
+ * `optimal` is the reference policy — the one the gate runs, tuned over the
+ * sweep. The other four each take one of its levers and lean on it to the
+ * exclusion of the others, which is the point: what they measure is not whether
+ * a lever is good but whether the game rewards specialising in it. A strategy
+ * that wins as often as the reference on a fifth of the moving parts is telling
+ * you the rest of the parts are decoration.
+ */
+const STRATEGIES = {
+  optimal: {},
+
+  // Fewer guns, every one of them as high as it will go. Two kinds only, the
+  // Tinker's Shed early because an evolution is worth two and a half tier-5s,
+  // and no fitting held back to found a sixth tower that will never be built.
+  tiers: {
+    maxTowers: 3, mateShare: 1, tinkerFrom: 30, tierFirst: true, manFromTier: 3,
+  },
+
+  // Hands are the one resource the island cannot make. A flare is 300 wood and
+  // 40 iron, a quarter off with a Powder Store, and it is the only way past a
+  // crew of ten — so the Store goes up in act 1 and no wood is ever spent below
+  // the price of the next boat.
+  flare: {
+    powderEarly: true, flareFirst: true, forge: true, maxTowers: 4, camps: 2,
+  },
+
+  // The seams, not the smelter. An iron tile is 10 iron for one worker's turn
+  // where a Forge makes one a turn out of three stone, so the crew cut ore
+  // wherever the frontier offers it and the fittings are crafted rather than
+  // bought.
+  iron: {
+    mineIron: true, forge: true, towerKind: 1, camps: 2,
+  },
+
+  // What the island is already holding: chests at 220 gold apiece, wrecks at 60
+  // wood 30 iron 10 gold, the castaway, the spring. Cut the ground over them
+  // first, work them the turn they open, and put a camp on every cache.
+  poi: {
+    poiFirst: true, features: 8, camps: 5, maxTowers: 4,
+  },
 };
 
 function policy(s, k, m) {
@@ -328,6 +382,9 @@ function policy(s, k, m) {
   const wish = [];
   if (!built(s, 'bunkhouse').length) wish.push({ b: 'bunkhouse' });
   if (camps < 1) wish.push({ b: 'excavation' });
+  // The flare strategy's whole bet: a quarter off every boat and a turn instead
+  // of three, bought before the first gun rather than after the fifth.
+  if (k.powderEarly && !built(s, 'powder').length) wish.push({ b: 'powder' });
   // The house that supplies the gun line's fitting, before the gun line: a
   // fitting is crafted at a Workshop or bought off a Peculiar Merchant and got
   // nowhere else, so without it every tower below is an order that is refused.
@@ -344,6 +401,9 @@ function policy(s, k, m) {
   if (!built(s, 'warehouse').length) wish.push({ b: 'warehouse' });
   if (camps < 2) wish.push({ b: 'excavation' });
   for (let i = 2; i < k.maxTowers; i++) wish.push({ tower: true });
+  // Every cache under a camp, for the strategy that plays the island's own
+  // buried gold rather than the frontier.
+  if (k.poiFirst) for (let i = camps; i < k.camps; i++) wish.push({ b: 'excavation' });
   if (camps < k.camps) wish.push({ b: 'excavation' });
 
 
@@ -359,7 +419,21 @@ function policy(s, k, m) {
     if (O.enqueue(s, { type: 'repairBuilding', buildingId: b.id }).ok) break;
   }
 
+  // Wood the next boat is going to need is not wood to spend on a yard. Held
+  // against the act's own allowance rather than against what is affordable
+  // today: the whole point of a reserve is the turns when the boat cannot be
+  // paid for yet, and asking `canEnqueue` would have answered "no flare, spend
+  // freely" on exactly those turns.
+  const flaresLeft = B.flareAllowance(s) - (s.crew.flaresFired + s.crew.flaresInFlight.length);
+  const holdWood = k.flareFirst && flaresLeft > 0 ? B.flareCost(s).wood : 0;
+  const affordable = (w) => {
+    if (!holdWood || w.tower) return true;
+    const cost = C.buildingCost(w.b) || {};
+    return s.res.wood - (cost.wood || 0) >= holdWood;
+  };
+
   for (const w of wish) {
+    if (!affordable(w)) continue;
     if (w.tower) {
       if (s.towers.length >= k.maxTowers) continue;
       // the minor kind exists only to be evolved with the major one
@@ -430,7 +504,9 @@ function policy(s, k, m) {
   // handed, so this is no longer a rule it would break — but it is still the
   // right play: the founding spends the lowest tier held, and a stack merged
   // away is a gun that has to be bought again before the next tower goes up.
-  const wantMore = s.towers.length < k.maxTowers;
+  // Holding tier-1s back founds the next gun; spending them raises the ones
+  // standing. The tier strategy is the second of those and nothing else.
+  const wantMore = !k.tierFirst && s.towers.length < k.maxTowers;
   let merged = true;
   while (merged) {
     merged = false;
@@ -517,7 +593,12 @@ function policy(s, k, m) {
   if (driving) m.route = driveRoadGang(s, target, k.gang, 0);
 
   // anything the digging has uncovered is worth a body for one turn
-  workFeatures(s, 3);
+  workFeatures(s, k.features);
+  // The two strategies that pick their ground rather than taking the nearest of
+  // it. Queued before the frontier pass below, which fills in with whatever is
+  // left — so this is a preference, not a restriction.
+  if (k.mineIron) cutWhere(s, (t) => t.terrain === 'iron');
+  if (k.poiFirst) cutWhere(s, (t) => !!t.feature && !t.featureWorked);
   // A clear order is one tile, so the crew goes back on the frontier every
   // turn — each worker taking the nearest face to where they already stand.
   putCrewOnFrontier(s);
@@ -553,6 +634,27 @@ function policy(s, k, m) {
   }
 }
 
+/**
+ * Put whatever hands are spare on the faces that answer `want`, nearest first.
+ *
+ * The frontier pass that follows takes the nearest tile to each body, which is
+ * the right default and the wrong one for a strategy about *which* ground: an
+ * iron seam four tiles out is worth more than the forest under somebody's feet,
+ * and a chest is worth more than either. Queued first, so those tiles are taken
+ * before the general pass sees them, and everyone it does not use is still put
+ * to work by it.
+ */
+function cutWhere(s, want) {
+  const faces = O.workableTiles(s).filter(want);
+  if (!faces.length) return 0;
+  let placed = 0;
+  for (const f of faces.sort((a, b) => H.distance(a, s.base) - H.distance(b, s.base))) {
+    if (O.projectedHands(s) <= 0) break;
+    if (O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: f.q, r: f.r } }).ok) placed++;
+  }
+  return placed;
+}
+
 /** Keep every labour officer working all the faces he can hold. */
 function topUpFaces(s) {
   for (const o of s.crew.officers) {
@@ -570,7 +672,7 @@ function topUpFaces(s) {
 
 // ---- a run ------------------------------------------------------------------
 
-export { DEFAULTS, policy };
+export { DEFAULTS, STRATEGIES, policy };
 
 export function playRun(seed, opts = {}) {
   const k = { ...DEFAULTS, ...opts };
@@ -634,6 +736,35 @@ const traceIdx = args.indexOf('--trace');
 const seedsIdx = args.indexOf('--seeds');
 const nSeeds = seedsIdx >= 0 ? Number(args[seedsIdx + 1]) : 6;
 const sweepIdx = args.indexOf('--sweep');
+const stratIdx = args.indexOf('--strategy');
+const compareIdx = args.indexOf('--compare');
+const named = stratIdx >= 0 ? args[stratIdx + 1] : null;
+if (named && !STRATEGIES[named]) {
+  console.log(`no such strategy: ${named}. One of ${Object.keys(STRATEGIES).join(', ')}`);
+  process.exit(1);
+}
+const knobs = named ? STRATEGIES[named] : {};
+
+/** One strategy over `nSeeds` seeds, as a row and its runs. */
+function runStrategy(name) {
+  const rows = [];
+  for (let i = 0; i < nSeeds; i++) rows.push(playRun(C.DEFAULT_SEED + i, STRATEGIES[name]));
+  const wins = rows.filter((r) => r.outcome === 'won');
+  return {
+    name,
+    rows,
+    wins: wins.length,
+    kills: rows.reduce((n, r) => n + (2 - r.spawnersLeft), 0),
+    meanTurn: wins.length ? Math.round(wins.reduce((n, r) => n + r.turn, 0) / wins.length) : 0,
+    meanPower: Math.round(rows.reduce((n, r) => n + r.peakPower, 0) / rows.length),
+    meanHands: Math.round(rows.reduce((n, r) => n + r.hands, 0) / rows.length),
+    meanGold: Math.round(rows.reduce((n, r) => n + r.gold, 0) / rows.length),
+    meanCleared: Math.round(rows.reduce((n, r) => n + r.cleared, 0) / rows.length),
+    assaults: rows.reduce((n, r) => n + r.assaults, 0),
+    meanLoss: Math.round(rows.filter((r) => r.outcome !== 'won')
+      .reduce((n, r, _, a) => n + r.turn / a.length, 0)),
+  };
+}
 
 if (sweepIdx >= 0) {
   const grid = [];
@@ -657,14 +788,37 @@ if (sweepIdx >= 0) {
     console.log(`${String(r.digRoadFrom).padStart(4)} ${String(r.gang).padStart(4)} ${String(r.maxTowers).padStart(6)} |` +
       ` ${String(r.wins).padStart(4)}/${nSeeds} ${String(r.kills).padStart(5)} ${String(r.meanWin || '-').padStart(11)}`);
   }
+} else if (compareIdx >= 0) {
+  // Every strategy over the same seeds, so the column that differs is the plan
+  // and nothing else.
+  const names = Object.keys(STRATEGIES);
+  console.log(`${nSeeds} seeds each, ${names.length * nSeeds} runs\n`);
+  // Printed as each finishes rather than at the end: thirty runs is twenty
+  // minutes, and a table that appears all at once is twenty minutes of nothing.
+  const out = [];
+  for (const name of names) {
+    const r = runStrategy(name);
+    out.push(r);
+    console.log(`  ${r.name.padEnd(9)} ${r.wins}/${nSeeds} won, ${r.kills} spawners`);
+  }
+  console.log('\nstrategy  wins kills  meanWin  meanLoss  power hands  gold cleared assaults');
+  for (const r of out.sort((a, b) => b.wins - a.wins || b.kills - a.kills)) {
+    console.log(
+      `${r.name.padEnd(9)} ${String(r.wins).padStart(2)}/${nSeeds} ${String(r.kills).padStart(5)}` +
+      ` ${String(r.meanTurn || '-').padStart(8)} ${String(r.meanLoss || '-').padStart(9)}` +
+      ` ${String(r.meanPower).padStart(6)} ${String(r.meanHands).padStart(5)}` +
+      ` ${String(r.meanGold).padStart(5)} ${String(r.meanCleared).padStart(7)} ${String(r.assaults).padStart(8)}`);
+  }
+  console.log('\nkills is spawners destroyed out of ' + (2 * nSeeds) + '; meanLoss is how far a losing run got.');
 } else if (traceIdx >= 0) {
   const seed = Number(args[traceIdx + 1]) || C.DEFAULT_SEED;
-  const r = playRun(seed, { trace: true });
+  const r = playRun(seed, { ...knobs, trace: true });
   console.log(r.journal.join('\n'));
   console.log(`\n${seed}: ${r.outcome} on turn ${r.turn}, hull ${r.hull}, ${r.spawnersLeft} spawners left`);
 } else {
   const rows = [];
-  for (let i = 0; i < nSeeds; i++) rows.push(playRun(C.DEFAULT_SEED + i));
+  for (let i = 0; i < nSeeds; i++) rows.push(playRun(C.DEFAULT_SEED + i, knobs));
+  if (named) console.log(`strategy: ${named}`);
   console.log('seed      outcome       turn hull left power cleared gold camps towers        assaults camp road kill');
   for (const r of rows) {
     console.log(
@@ -680,8 +834,12 @@ if (sweepIdx >= 0) {
   // to anything but a reader. The floor is deliberately low — this asserts that
   // the game is still winnable by an honest policy, not that it wins often.
   // Raise it with --min N when you want a stricter bar.
+  //
+  // It applies to the reference policy only. A specialised strategy scoring
+  // nothing is a finding about that strategy, not a broken build — `flare` at
+  // 0/6 is the harness working, not the harness failing.
   const minIdx = args.indexOf('--min');
-  const floor = minIdx >= 0 ? Number(args[minIdx + 1]) : 1;
+  const floor = minIdx >= 0 ? Number(args[minIdx + 1]) : (named ? 0 : 1);
   if (wins < floor) {
     console.log(`FAIL — wanted at least ${floor} win${floor === 1 ? '' : 's'} in ${rows.length}`);
     process.exit(1);
