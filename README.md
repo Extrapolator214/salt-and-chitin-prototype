@@ -601,10 +601,14 @@ quality is this build's invention.
   the landing. Without it the stream spokes seal the ship in and leave its guns
   no arc, and wave 1 becomes a lottery decided by where the noise happened to
   run. The cove wall stands outside it, at `LANDING_CLIFF_RADIUS`.
-- **`FLARE_COST_IRON` 40**, not the spec's 120, and **`FLARE_COST_WOOD` 300**,
+- **`FLARE_COST_IRON` 30**, not the spec's 120, and **`FLARE_COST_WOOD` 225**,
   not 250. The iron cut is the experiment under "What the simulations found"
   made permanent: at 120 a real player could fire exactly one flare in 300
-  turns, which made the act structure unreachable rather than expensive.
+  turns, which made the act structure unreachable rather than expensive. Both
+  came down a further quarter afterwards, with the **Powder Store** (75w 53s,
+  was 100w 70s): a boat was payable on the schedule and still never actually
+  paid for, because every other use of the wood buys something this turn where
+  a flare buys five hands in two.
 - **`FLARE_COOLDOWN` 10** — a floor of ten turns between boats on top of the
   act gate, with its own refusal line ("the last boat left N turns ago"). The
   act allowance says how many; this says they cannot all arrive at once.
@@ -1056,9 +1060,10 @@ two are shore, in whichever of the six rotations the coast will take.)
 | Tinker's Shed | 4 | 130w 90s | | Hospital | 3 | 90w 60s |
 | | | | | Bunkhouse | 3 | 50w 40s |
 
-(The Palisade is a twelfth building and not one of the eleven: 1 tile, 45w 30s,
-and no part of the economy. It was 140w 90s — dearer than a Bunkhouse for one
-tile of wall, which priced the first one out rather than the tenth.)
+(The Palisade is a twelfth building and not one of the eleven: 1 tile, 30w 20s —
+a tower's emplacement price for a tile of ground the enemy will not cross — and
+no part of the economy. It was 140w 90s, dearer than a Bunkhouse for one tile of
+wall, which priced the first one out rather than the tenth.)
 
 **Every resolve now ends with a modal**, not only the eventful ones. A quiet
 turn says so — "a quiet turn — nothing came of it" — and then reports what is

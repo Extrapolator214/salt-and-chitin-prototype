@@ -186,7 +186,7 @@ buildable and free.
 
 ## §6 · Flares
 
-- **250 wood + 120 iron** (−25% with a Powder Store). The price never escalates.
+- **225 wood + 30 iron** in this build, the spec's 250 and 120 (−25% with a Powder Store, which itself costs 75 wood + 53 stone). The price never escalates.
 - Brings **5 hands**, landing **2 turns** later (1 with a Powder Store) on the
   beach beside the base. The boat stays there permanently.
 - Gated by act: 1 in act I, 3 cumulative by act II, 6 by act III.

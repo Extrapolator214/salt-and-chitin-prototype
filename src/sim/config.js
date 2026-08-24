@@ -241,12 +241,16 @@ const C = {
   // The six flares the acts are built around should land at roughly turn 50,
   // 100 and 120, then 200, 210 and 215 — so the price has to be payable on
   // that schedule out of a crew of ten, not merely payable in principle.
-  FLARE_COST_WOOD: 300,
+  // A quarter off both halves of the price: at 300 and 40 the boat was payable
+  // on the schedule and never actually paid for, because everything else the
+  // wood buys — a yard, a gun, a hull patched back up — buys it this turn where
+  // a flare buys five hands in two.
+  FLARE_COST_WOOD: 225,
   // [cal] — spec value 120. A Forge makes 1 iron a turn and is the only source,
   // so at 120 a run affords one flare on turn 144 against the six the acts are
   // built around: the crew could never grow. It matters now that it could not,
   // because the gun line act 3 demands is nine hands of the ten you land with.
-  FLARE_COST_IRON: 40,
+  FLARE_COST_IRON: 30,
   FLARE_HANDS: 5,
   FLARE_DELAY_TURNS: 2,
   FLARE_DELAY_POWDER: 1,
@@ -413,23 +417,23 @@ const C = {
     { type: 'tinker', name: "Tinker's Shed", tiles: 4, cost: { wood: 130, stone: 90 }, owns: 'evolution', effect: 'evolutions become possible', repeatable: false },
     { type: 'sappers', name: "Sappers' Camp", tiles: 6, cost: { wood: 380, stone: 260 }, owns: 'offence', effect: 'sabotage teams can be raised', repeatable: false },
     { type: 'hospital', name: 'Hospital', tiles: 3, cost: { wood: 90, stone: 60 }, owns: 'downtime', effect: 'sabotage downtime 3 -> 1 turn', repeatable: false },
-    { type: 'powder', name: 'Powder Store', tiles: 3, cost: { wood: 100, stone: 70 }, owns: 'the flare', effect: 'flare cost -25%, lands in 1 turn', repeatable: false },
+    { type: 'powder', name: 'Powder Store', tiles: 3, cost: { wood: 75, stone: 53 }, owns: 'the flare', effect: 'flare cost -25%, lands in 1 turn', repeatable: false },
     { type: 'excavation', name: 'Excavation Camp', tiles: 4, cost: { wood: 100, stone: 60 }, owns: 'buried gold', effect: 'works one cache: 220 gold over 10 turns', repeatable: true },
     { type: 'bunkhouse', name: 'Bunkhouse', tiles: 3, cost: { wood: 50, stone: 40 }, owns: 'manning', effect: 'buildings within radius 3 cost 1 hand', repeatable: true },
     // Not an economy at all: one tile of ground the enemy will not cross. It is
     // exempt from both rules below — a palisade that needed a road beside it and
     // could not touch its neighbour would not be a wall.
     //
-    // A third of what it used to be. At 140 wood and 90 stone a single tile of
-    // wall cost more than a Bunkhouse and nearly as much as a Trading Dock, so
-    // the price was not "a line of them is a plan rather than a habit" — it was
-    // "nobody builds one". A wall is only worth having by the half dozen, and
-    // the thing that should stop a player walling the island in is the labour
-    // and the ground it takes, not a price that rules out the first one.
+    // A tower's price for a tile of ground the enemy will not cross, and no gun
+    // on it. It was 140 wood and 90 stone — dearer than a Bunkhouse for one hex,
+    // which priced out the first wall rather than the tenth — then a third of
+    // that, and now the same 30 and 20 an emplacement costs. What should stop a
+    // player walling the island in is the labour and the ground it takes, not a
+    // price that rules out trying it at all.
     //
     // `blocksCrew` is what makes it a wall and not a yard: the crew walk through
     // the ship and through their own workshops, and stop at this.
-    { type: 'wall', name: 'Palisade', tiles: 1, cost: { wood: 45, stone: 30 }, crew: 0, economic: false, blocksCrew: true, owns: 'the ground', effect: 'the enemy will not cross it; needs no crew', repeatable: true },
+    { type: 'wall', name: 'Palisade', tiles: 1, cost: { wood: 30, stone: 20 }, crew: 0, economic: false, blocksCrew: true, owns: 'the ground', effect: 'the enemy will not cross it; needs no crew', repeatable: true },
   ],
   // An economic building is a yard on your supply line, not a shed in the
   // woods: it must have road joined to the ship beside it, and it must stand

@@ -109,8 +109,8 @@ Build constants; the spec's corridor and apron are gone (see README).
 
 | constant | value |
 |---|---|
-| `FLARE_COST_WOOD` | 250 |
-| `FLARE_COST_IRON` | 120 |
+| `FLARE_COST_WOOD` | 250 — the build runs **225** |
+| `FLARE_COST_IRON` | 120 — the build runs **30**; see the README on why |
 | `FLARE_HANDS` | 5 |
 | `FLARE_DELAY_TURNS` | 2 (1 with a Powder Store) |
 | `FLARE_GATE` | act I: 1 · act II: 2 · act III: 3 (cumulative max 6) |
@@ -294,10 +294,10 @@ building that wants two takes two, and the third order is refused.
 | Tinker's Shed | 3 | 4 | evolutions can be performed |
 | Sappers' Camp | 3 | 6 | assault teams can be raised |
 | Hospital | 2 | 3 | assault downtime 3 turns → 1 |
-| Powder Store | 2 | 3 | flare cost −25%, lands in 1 turn |
+| Powder Store | 2 | 3 | flare cost −25%, lands in 1 turn · **75 wood + 53 stone**, a quarter under the flat price |
 | Excavation Camp | 3 | 4 | works one treasure cache; 100 gold over 10 turns |
 | Bunkhouse | 2 | 3 | buildings within radius 3 cost 1 hand |
-| Palisade | — | 1 | the enemy will not cross it; no crew · **45 wood + 30 stone**, a third of the flat price |
+| Palisade | — | 1 | the enemy will not cross it; no crew · **30 wood + 20 stone**, the same as a tower's emplacement |
 
 Excavation Camp, Bunkhouse and Palisade are repeatable; the rest are one each.
 Any of them but the Palisade can be disassembled for `BUILDING_REFUND` — 90% of
