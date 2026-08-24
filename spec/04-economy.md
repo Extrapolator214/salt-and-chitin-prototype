@@ -131,7 +131,7 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 | Warehouse | 3 | inventory | the hold becomes unlimited |
 | Forge | 2 | iron | 3 stone → 1 iron per turn |
 | Workshop | 3 | ironwork | the iron fittings craftable at 6 iron |
-| Trading Dock | 3 | the surplus | 12 wood or stone → 1 gold per turn, and a counter to trade over |
+| Trading Dock | 5 | the surplus | 12 wood or stone → 1 gold per turn, and a counter to trade over · **half in the water** |
 | Peculiar Merchant | 3 | oddities | the gold fittings buyable at 8 gold; runs on 1 hand |
 | Tinker's Shed | 3 | evolution | evolutions become possible |
 | Sappers' Camp | 3 | offence | assault teams can be raised |
@@ -142,12 +142,16 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 
 Excavation Camp and Bunkhouse may be built repeatedly; the rest are one each.
 
-**A yard can be pulled down again.** `BUILDING_REFUND` (90%) of what was paid
-comes back — the crew upgrade included, if one was bought — the ground comes
-free, and whoever was manning it walks out. A ruin refunds the same: the player
-paid the same for it, and clearing rubble should not be dearer than clearing a
-working house. An Excavation Camp pulled down before it pays gives its cache
-back undug rather than burying it for the rest of the run. The Palisade is not
+**A yard can be disassembled**, as a tower can. `BUILDING_REFUND` (90%) of what
+was paid comes back — the crew upgrade included, if one was bought — the ground
+comes free, and whoever was manning it walks out. A ruin refunds the same: the
+player paid the same for it, and clearing rubble should not be dearer than
+clearing a working house. An Excavation Camp disassembled before it pays gives
+its cache back undug rather than burying it for the rest of the run.
+
+The word is not an accident. A building the swarm **pulls down** is a ruin
+standing on its own ground; one the crew **disassemble** is gone, with its wood
+and stone back in the stores. Two different endings, two different words. The Palisade is not
 offered it: it is not one of the eleven. What is lost is the turn it took to
 build and the turn it takes to build again somewhere else, which is the right
 price for changing your mind about where a house goes.
@@ -157,6 +161,19 @@ reach, or a crew upgrade paid for, drops what a house wants by a hand — and th
 hand already standing in it is stood down that same turn (step 3) rather than
 left manning a job that no longer exists. Whoever is still walking to the house
 goes first, then the last one put on.
+
+**The Trading Dock is built on the water.** A dock that stands in a field is a
+warehouse with a rumour of the sea about it, so its five tiles are two of shore
+and three of **salt water** in the row against them — the counter on the land,
+the jetty out over the sea. Both halves are checked on their own terms: the
+shore tiles must be ground a building could stand on, the water tiles must be
+open salt water with nothing on them.
+
+Its shape is fixed and its **facing is not**. A coast runs whichever way it
+runs, so the plan is laid in each of the six rotations and the first that fits
+the ground is the one the cursor carries. The rotation is worked out from the
+map every time it is asked for rather than stored, which is what keeps the
+placement ghost, the queue and the resolve agreeing about the same plot.
 
 **The dock counter.** Beside its standing trade, a manned Trading Dock buys and
 sells wood, stone and iron to order in whatever amount. It is instant — no turn,

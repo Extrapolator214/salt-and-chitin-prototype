@@ -392,8 +392,13 @@ function poiPane(b) {
       `<b>${haulText(b.haul)}</b> out of her ribs`);
   }
   if (b.feature === 'cache') {
+    // No fitting comes from nowhere: each shelf has exactly one house that
+    // supplies it. What gold is worth is that it is *itself* the price at the
+    // Merchant's counter, where a Workshop wants iron — and iron has to be
+    // smelted, cut out of a seam, or bought before it can be spent.
     return pane('a chest is dug up', art.CACHE,
-      `<b>+${b.gold}</b> gold, and gold buys a gun outright — iron wants a Workshop first`);
+      `<b>+${b.gold}</b> gold — a <b>Peculiar Merchant</b> sells guns for it, `
+      + 'where a Workshop sells nothing and wants iron');
   }
   return pane('a castaway is saved', art.CASTAWAY,
     b.name ? `${esc(b.name)} joins the company — ${esc(b.trade || 'a pirate')}` : 'he joins the company');
@@ -475,6 +480,7 @@ export function panelHtml(reel, speed) {
     + '<span class="k">speed</span>'
     + `<button data-r="1"${on(1)}>1x</button>`
     + `<button data-r="3"${on(3)}>3x</button>`
+    + `<button data-r="10"${on(10)}>10x</button>`
     + `<button data-r="skip"${on('skip')}>skip</button>`
     + '</div>';
 

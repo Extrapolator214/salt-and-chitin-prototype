@@ -152,10 +152,11 @@ export function load() {
  * The settings, with the defaults for anything never set.
  *
  * `idleWarning`: whether ending a turn with somebody standing about stops to say
- * so. `contactSpeed`: the pace a contact plays back at. Both survive a new run
- * and a reload — the point of a box that can be turned off is that it stays off,
- * and a player who watches fights at 3x wants the next one at 3x too, not to
- * press the same button at the top of every contact for the rest of the run.
+ * so. `contactSpeed`: the pace a contact plays back at — 1, 3 or 10. Both
+ * survive a new run and a reload — the point of a box that can be turned off is
+ * that it stays off, and a player who watches fights at 10x wants the next one
+ * at 10x too, not to press the same button at the top of every contact for the
+ * rest of the run.
  */
 export const PREF_DEFAULTS = { idleWarning: true, contactSpeed: 1 };
 

@@ -303,8 +303,16 @@ function afterReel() {
   finishTurn();
 }
 
+// The paces a contact plays back at. 10x is not a fourth speed so much as a way
+// of watching a long fight at all: an act-3 wave is two hundred units walking a
+// forty-tile road, which is minutes of real time at 1x.
+const CONTACT_SPEEDS = [1, 3, 10];
+
 /** The remembered contact pace, and a guard on whatever storage handed back. */
-const contactSpeed = () => (Number(ui.prefs.contactSpeed) === 3 ? 3 : 1);
+const contactSpeed = () => {
+  const want = Number(ui.prefs.contactSpeed);
+  return CONTACT_SPEEDS.includes(want) ? want : 1;
+};
 
 // ---- the resolve reel ------------------------------------------------------
 
@@ -571,6 +579,10 @@ canvas.addEventListener('mouseleave', () => { ui.hover = null; renderHover(state
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   if (handsOff()) return;
+  // Carrying a shape, the right button puts it down again — nothing else on the
+  // map wants a right-click while a silhouette is following the cursor, and Esc
+  // is a long way from a hand that is already on the mouse.
+  if (ui.placing) { ui.placing = null; refresh(); return; }
   assignClearAt(screenToAxial(cam, canvas, e.offsetX, e.offsetY));
 });
 
@@ -659,7 +671,8 @@ window.addEventListener('keydown', (e) => {
   if (state.phase === 'combat') {
     if (e.key === '1') setSpeed('1');
     if (e.key === '2') setSpeed('3');
-    if (e.key === '3') setSpeed('skip');
+    if (e.key === '3') setSpeed('10');
+    if (e.key === '4') setSpeed('skip');
   }
   const step = 60;
   const k = e.key.toLowerCase();

@@ -1662,17 +1662,70 @@ runSection('3.6e', () => {
       tt.terrain = 'road'; tt.cleared = true;
     }
     St.touchMap(s);
-    let laid = 0, offOk = true, first = null;
+    // The Trading Dock is the one exception, and it is exempt by rule rather
+    // than by accident: its shape is fixed — two on the shore, three on the
+    // water — but which way round it faces is whatever the coast will take, so
+    // what has to hold for it is that every plan is one of its six rotations.
+    const dockShapes = new Set(C.dockPlans()
+      .map((pl) => JSON.stringify([...pl.land, ...pl.water])));
+    let laid = 0, offOk = true, first = null, docks = 0, dockOk = true;
     for (const def of C.BUILDINGS) {
       const want = JSON.stringify(C.buildingShape(def.tiles));
       for (const h of H.spiral(s.base, 12)) {
         const plan = B.buildingPlan(s, def.type, h.q, h.r);
         if (!plan) continue;
         const offsets = JSON.stringify(plan.map((p) => [p.q - h.q, p.r - h.r]));
+        if (def.type === 'dock') {
+          docks++;
+          if (!dockShapes.has(offsets)) { dockOk = false; first = first || `dock at (${h.q},${h.r})`; }
+          continue;
+        }
         laid++;
         if (offsets !== want) { offOk = false; first = first || `${def.type} at (${h.q},${h.r})`; }
       }
     }
+    // What you see is what you get. The ghost under the cursor, the plot the map
+    // marks once the order is queued, and the ground the building actually takes
+    // are three different code paths asking the same question, and they have to
+    // give the same answer — the dock caught this by rotating between the click
+    // and the queue, but the rule is every building's.
+    {
+      const s2 = St.createState(20260816);
+      s2.res.wood = 1e6; s2.res.stone = 1e6;
+      for (const h of H.spiral(s2.base, 10)) {
+        const tt = St.tileAt(s2, h.q, h.r);
+        if (!tt || tt.occupant || tt.terrain === 'saltwater') continue;
+        tt.terrain = 'road'; tt.cleared = true;
+      }
+      St.touchMap(s2);
+      const shape = (tiles) => tiles.map((p) => `${p.q},${p.r}`).sort().join(' ');
+      let checked = 0, agree = true, firstOdd = null;
+      for (const def of C.BUILDINGS) {
+        for (const h of H.spiral(s2.base, 10)) {
+          if (!B.canBuildBuilding(s2, def.type, h.q, h.r).ok) continue;
+          const ghost = shape(B.footprintPreview(s2, h.q, h.r, def.tiles, false, def.type));
+          const order = { type: 'buildBuilding', building: def.type, q: h.q, r: h.r };
+          if (!O.enqueue(s2, order).ok) continue;
+          const queued = shape(B.plotTiles(s2, def.type, h.q, h.r));
+          // `applyQueue` empties the queue before it applies any of it, so a
+          // plot never blocks itself — asked with the order still standing,
+          // every building's own tiles read as claimed.
+          s2.orders.length = 0;
+          const built = shape(B.buildingFootprint(s2, def.type, h.q, h.r) || []);
+          checked++;
+          if (ghost !== queued || ghost !== built) {
+            agree = false;
+            firstOdd = firstOdd || `${def.type} at (${h.q},${h.r}): ghost [${ghost}] queued [${queued}] built [${built}]`;
+          }
+          break;              // one placement per type is enough to catch a drift
+        }
+      }
+      t('what the cursor shows is what the queue marks and what gets built',
+        agree && checked >= 8, firstOdd || `${checked} types placed and compared`);
+    }
+
+    t('the Trading Dock is one of its own six rotations, wherever it is laid',
+      dockOk && docks > 100, `${docks} placements${first ? `, first odd one ${first}` : ''}`);
     t('a building is the same shape at every anchor, fitting or not', offOk && laid > 200,
       `${laid} placements checked${first ? `, first odd one ${first}` : ''}`);
   }

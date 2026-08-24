@@ -708,8 +708,9 @@ function attempt(seed, attemptNo) {
   };
 
   // Treasure is layered. A tile is three turns of cutting, so a chest eighteen
-  // tiles inland is most of an act away — and gold buys a gun outright, where
-  // iron wants a Forge and a Workshop standing first. `CACHE_NEAR` guarantees
+  // tiles inland is most of an act away — and gold is spendable the moment a
+  // Peculiar Merchant stands, where a Workshop turns iron into fittings and the
+  // iron has to be got first. `CACHE_NEAR` guarantees
   // the first few are within reach of the landing; the rest are scattered
   // across the island as before.
   const [lo, hi] = C.CACHE_DIST;

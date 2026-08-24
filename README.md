@@ -1050,6 +1050,9 @@ so adding a building moves neither silently.
 | Warehouse | 5 | 150w 100s | | Powder Store | 3 | 100w 70s |
 | Workshop | 5 | 150w 100s | | Excavation Camp | 4 | 100w 60s |
 | Trading Dock | 5 | 140w 90s | | Peculiar Merchant | 3 | 90w 60s |
+
+(The Trading Dock's five are not five of anything else: three are salt water and
+two are shore, in whichever of the six rotations the coast will take.)
 | Tinker's Shed | 4 | 130w 90s | | Hospital | 3 | 90w 60s |
 | | | | | Bunkhouse | 3 | 50w 40s |
 

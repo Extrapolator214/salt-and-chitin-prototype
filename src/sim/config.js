@@ -446,6 +446,18 @@ const C = {
   // keeps every one of them compact and centred on the tile you clicked.
   // Offsets are axial [dq, dr]; the ring order is (+1,0) (+1,-1) (0,-1) (-1,0)
   // (-1,+1) (0,+1), so consecutive petals always touch.
+  // The Trading Dock is the one building that stands in the water: three tiles
+  // of salt water carrying the jetty, and two of shore behind them carrying the
+  // counter. Its own shape, not one of the sizes below, because the two halves
+  // are not interchangeable — the water tiles must be water and the land tiles
+  // must be ground a building could stand on.
+  //
+  // Written as it reads on a south-facing shore: the anchor and its neighbour
+  // on the land, the three water tiles in the row beneath. `dockPlans` turns
+  // that into all six rotations, so a dock on the north coast is the same
+  // building the other way up rather than a building that cannot be built.
+  DOCK_SHAPE: { land: [[0, 0], [1, 0]], water: [[-1, 1], [0, 1], [1, 1]] },
+
   BUILDING_SHAPES: {
     1: [[0, 0]],
     2: [[0, 0], [1, 0]],
@@ -553,7 +565,7 @@ const C = {
   FEATURE_MIN_APART: 6,
   CACHE_DIST: [6, 58],   // from the base, across a 2 x ISLAND_RADIUS island
   CACHE_NEAR: [5, 11],   // the first few sit within reach of the landing
-  CACHE_NEAR_COUNT: 3,   // ...and gold buys a gun before a Workshop stands
+  CACHE_NEAR_COUNT: 3,   // ...and gold is spendable at a Merchant as it comes in
 
   // 13 · Officers
   // Four sail with the run. A fifth is found on the island: a random pirate,
@@ -655,6 +667,25 @@ C.officerVerb = (o) => {
 C.buildingDef = (type) => C.BUILDINGS.find((b) => b.type === type);
 /** The fixed shape of a building of n tiles: axial offsets from its anchor. */
 C.buildingShape = (n) => C.BUILDING_SHAPES[n] || C.BUILDING_SHAPES[1];
+/** One 60° turn of an axial offset, anticlockwise on screen. */
+const turn60 = ([q, r]) => [-r, q + r];
+const turned = (offs, n) => {
+  let out = offs;
+  for (let i = 0; i < n; i++) out = out.map(turn60);
+  return out;
+};
+/**
+ * The Trading Dock's six orientations, the written one first.
+ *
+ * A shore runs whichever way it runs, and a building with a fixed compass
+ * direction would be unbuildable on most of the island. The shape is the rule —
+ * three water, two land, the water in one row against the land — and the
+ * rotation is whichever of the six the ground will take.
+ */
+C.dockPlans = () => [0, 1, 2, 3, 4, 5].map((n) => ({
+  land: turned(C.DOCK_SHAPE.land, n),
+  water: turned(C.DOCK_SHAPE.water, n),
+}));
 /** That shape laid on the map at (q, r). */
 C.buildingTiles = (n, q, r) => C.buildingShape(n).map(([dq, dr]) => ({ q: q + dq, r: r + dr }));
 /**

@@ -292,7 +292,7 @@ export function queuedStructuresAt(state, at) {
   return state.orders.filter((o) => {
     if (o.type === 'buildBuilding') {
       const def = C.buildingDef(o.building);
-      return !!def && covers(C.buildingTiles(def.tiles, o.q, o.r));
+      return !!def && covers(B.plotTiles(state, o.building, o.q, o.r));
     }
     if (o.type === 'buildTower') return covers(C.towerTiles(o.towerIndex, o.q, o.r));
     if (o.type === 'buildBridge') return o.q === at.q && o.r === at.r;
@@ -499,7 +499,7 @@ export const ORDERS = {
   demolishBuilding: {
     label: (o, state) => {
       const b = state.buildings.find((x) => x.id === o.buildingId);
-      return `pull down ${b ? b.name : 'a building'}`;
+      return `disassemble ${b ? b.name : 'a building'}`;
     },
     cost: () => NO_COST,
     gain: (state, o) => {
@@ -513,7 +513,7 @@ export const ORDERS = {
       const name = b.name;
       const refund = B.demolishBuilding(state, b);
       events.push({ kind: 'demolished', what: name, q: b.q, r: b.r, refund });
-      addLog(state, `${name} at (${b.q},${b.r}) is pulled down — ${
+      addLog(state, `${name} at (${b.q},${b.r}) is disassembled — ${
         Object.entries(refund).map(([k, v]) => `${v} ${k}`).join(', ')} back`);
     },
   },
@@ -1073,7 +1073,7 @@ function checkAgainstQueue(state, order) {
       const b = state.buildings.find((x) => x.id === order.targetId);
       const need = tower ? towerManning(state, tower).need : b ? handsNeededFor(state, b) : 0;
       if (b && state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === b.id)) {
-        return no('it is queued to be pulled down');
+        return no('it is queued to be disassembled');
       }
       if (b && b.ruined) return no('a ruin has nothing to man');
       if (need <= 0) return no(b ? 'it runs on nobody' : 'it needs nobody');
@@ -1082,7 +1082,7 @@ function checkAgainstQueue(state, order) {
     }
     case 'upgradeCrew':
       if (state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === order.buildingId)) {
-        return no('it is queued to be pulled down');
+        return no('it is queued to be disassembled');
       }
       return state.orders.some((o) => o.type === 'upgradeCrew' && o.buildingId === order.buildingId)
         ? no('already queued') : ok;
@@ -1096,7 +1096,7 @@ function checkAgainstQueue(state, order) {
     // building until the turn ends, so the check alone would let it through.
     case 'repairBuilding':
       if (state.orders.some((o) => o.type === 'demolishBuilding' && o.buildingId === order.buildingId)) {
-        return no('it is queued to be pulled down');
+        return no('it is queued to be disassembled');
       }
       return state.orders.some((o) => o.type === 'repairBuilding' && o.buildingId === order.buildingId)
         ? no('already queued') : ok;

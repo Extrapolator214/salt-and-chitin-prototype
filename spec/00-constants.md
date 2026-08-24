@@ -288,7 +288,7 @@ building that wants two takes two, and the third order is refused.
 | Warehouse | 3 | 5 | inventory becomes unlimited |
 | Forge | 2 | 4 | 3 stone → 1 iron per turn |
 | Workshop | 3 | 5 | the iron fittings craftable at 6 iron |
-| Trading Dock | 3 | 5 | 12 wood or stone → 1 gold per turn, and the counter of §8b |
+| Trading Dock | 3 | 5 | 12 wood or stone → 1 gold per turn, and the counter of §8b · **stands half in the sea**: 3 of its 5 tiles are salt water, 2 are shore |
 | Peculiar Merchant | — | 3 | the gold fittings buyable at 8 gold; 1 hand |
 | Tinker's Shed | 3 | 4 | evolutions can be performed |
 | Sappers' Camp | 3 | 6 | assault teams can be raised |
@@ -299,8 +299,8 @@ building that wants two takes two, and the third order is refused.
 | Palisade | — | 1 | the enemy will not cross it; no crew · **45 wood + 30 stone**, a third of the flat price |
 
 Excavation Camp, Bunkhouse and Palisade are repeatable; the rest are one each.
-Any of them but the Palisade can be pulled down again for `BUILDING_REFUND` — 90%
-of what was paid, the crew upgrade included.
+Any of them but the Palisade can be disassembled for `BUILDING_REFUND` — 90% of
+what was paid, the crew upgrade included.
 
 **Under attack** (build rules). A tower is a fortification and nothing in the
 resolve attacks one; an economic building is not.

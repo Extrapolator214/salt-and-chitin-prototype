@@ -95,7 +95,7 @@ function queuedPlots(state) {
     if (o.type !== 'buildBuilding') continue;
     const def = C.buildingDef(o.building);
     if (!def) continue;
-    out.push({ type: o.building, tiles: C.buildingTiles(def.tiles, o.q, o.r) });
+    out.push({ type: o.building, tiles: plotTiles(state, o.building, o.q, o.r) });
   }
   return out;
 }
@@ -220,6 +220,7 @@ export function buildingAllow(state, type) {
 export function buildingPlan(state, type, q, r) {
   const def = C.buildingDef(type);
   if (!def) return null;
+  if (type === 'dock') return dockPlan(state, q, r, claimedTiles(state));
   const allow = buildingAllow(state, type);
   const claimed = claimedTiles(state);
   return C.buildingTiles(def.tiles, q, r).map((p) => {
@@ -227,6 +228,97 @@ export function buildingPlan(state, type, q, r) {
     const free = !claimed.has(key(p.q, p.r));
     return { q: p.q, r: p.r, ok: !!t && free && isBuildable(state, t, false) && (!allow || allow(t)) };
   });
+}
+
+/**
+ * The Trading Dock, which is two buildings in one shape: a jetty on the water
+ * and a counter on the shore.
+ *
+ * Every rotation is laid on the anchor and the best one wins — a whole plan if
+ * one fits, otherwise the one that comes closest, so the outline under the
+ * cursor points at what is actually wrong rather than at a shape nobody could
+ * have oriented. The rotation is not stored anywhere: it is worked out again
+ * from the ground each time it is asked for, which is what keeps the ghost, the
+ * queue and the resolve agreeing about the same plot.
+ */
+/** Does this tile answer the half of the shape it is standing in? */
+const dockTileOk = (state, t, water) => (water
+  ? (!!t && t.terrain === 'saltwater' && !t.occupant)
+  : (!!t && shoreTakesDock(state, t)));
+
+/**
+ * Which way round the dock faces here — read off the ground and nothing else.
+ *
+ * Not off the queue. The rotation used to be chosen against the claimed set,
+ * which meant it changed the moment the plot was queued: the order's own tiles
+ * came back as claimed, every rotation scored short, and the plot the map
+ * marked was a different shape from the ghost that had been clicked. Ground
+ * decides the facing; the queue decides only whether the plot is legal, which
+ * is a refusal the player can see rather than a silhouette that moves.
+ */
+function dockRotation(state, q, r) {
+  const plans = C.dockPlans();
+  let best = 0, bestScore = -1;
+  for (let i = 0; i < plans.length; i++) {
+    const pl = plans[i];
+    let score = 0;
+    for (const [dq, dr] of pl.land) if (dockTileOk(state, tileAt(state, q + dq, r + dr), false)) score++;
+    for (const [dq, dr] of pl.water) if (dockTileOk(state, tileAt(state, q + dq, r + dr), true)) score++;
+    if (score > bestScore) { best = i; bestScore = score; }
+    if (score === pl.land.length + pl.water.length) break;
+  }
+  return best;
+}
+
+function dockPlan(state, q, r, claimed) {
+  // No halo. The gap rule keeps yards from crowding each other and the ship's
+  // own standing — and the ship's standing is a beach, which is the only place
+  // a dock can go. Applied here it does not space the dock out, it forbids it.
+  const plan = C.dockPlans()[dockRotation(state, q, r)];
+  return [
+    ...plan.land.map(([dq, dr]) => ({ q: q + dq, r: r + dr, water: false })),
+    ...plan.water.map(([dq, dr]) => ({ q: q + dq, r: r + dr, water: true })),
+  ].map((p) => ({
+    q: p.q,
+    r: p.r,
+    ok: dockTileOk(state, tileAt(state, p.q, p.r), p.water) && !claimed.has(key(p.q, p.r)),
+  }));
+}
+
+const NO_CLAIMS = new Set();
+
+/**
+ * Ground the dock's shore half will stand on.
+ *
+ * Everything a yard would take, and sand besides. Sand is unbuildable because a
+ * warehouse on a beach is a warehouse sliding into the sea — a rule that has no
+ * business governing the one building whose whole point is to stand on the
+ * waterline. Without it the dock is not merely awkward to place: measured over
+ * three seeds at turn 60 there was not one legal plot on the island, because
+ * half of every shore is sand.
+ *
+ * The other guards are `isBuildable`'s own, so an unworked spring or officer
+ * site is no more built over here than anywhere else.
+ */
+function shoreTakesDock(state, t) {
+  if (isBuildable(state, t, false)) return true;
+  if (t.terrain !== 'sand' || t.occupant) return false;
+  if (!t.featureWorked && (t.feature === 'spring' || t.feature === 'officer')) return false;
+  return true;
+}
+
+/**
+ * The ground a plot of this type would take here, read off the map alone.
+ *
+ * Deliberately not `buildingPlan`: that one asks what the queue has already
+ * spoken for, and this is what answers that question. A queued plot does not
+ * need to avoid itself, so the dock's rotation here is chosen against the
+ * ground only.
+ */
+export function plotTiles(state, type, q, r) {
+  if (type === 'dock') return dockPlan(state, q, r, NO_CLAIMS).map((p) => ({ q: p.q, r: p.r }));
+  const def = C.buildingDef(type);
+  return def ? C.buildingTiles(def.tiles, q, r) : [];
 }
 
 /** The footprint a building of this type would take here, or null if it will not fit. */
@@ -545,7 +637,11 @@ export function buildBuilding(state, type, q, r) {
 }
 
 /**
- * Pulling a yard down and taking the materials back.
+ * Disassembling a yard and taking the materials back.
+ *
+ * Named as the towers' own `disassembleTower` is, and not as what the swarm
+ * does: a building the enemy pulls down is a ruin, a building the crew take
+ * apart is gone with its wood and stone back in the stores.
  *
  * A plot is a decision made once and lived with for the rest of the run: where
  * the first Forge went settles which way the road grows, and a player who put it
@@ -697,7 +793,10 @@ export function buildBridge(state, q, r) {
  */
 export function footprintPreview(state, q, r, n, forTower = false, type = null) {
   // Both draw their own fixed shape, whether or not the plot will take it — a
-  // tower reads `n` as its tower index, a building as its tile count.
+  // tower reads `n` as its tower index, a building as its tile count. The
+  // Trading Dock is the exception that proves it: its shape is fixed but its
+  // *rotation* is not, so what the cursor carries is whichever way round the
+  // shore will take it. See `dockPlan`.
   if (forTower) return towerPlan(state, q, r, n);
   return buildingPlan(state, type, q, r) || [];
 }

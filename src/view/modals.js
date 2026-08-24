@@ -92,7 +92,12 @@ const DEV_WHY = {
 const DEV_GRANT = 100;
 
 /**
- * Pulling a house down, offered on its own panel and nowhere else.
+ * Disassembling a house, offered on its own panel and nowhere else.
+ *
+ * The same word the towers use, for the same act — and deliberately not the
+ * word the resolve uses. A building the swarm *pulls down* is a ruin standing
+ * on its own ground; one the crew disassemble is gone, and the materials are
+ * back in the stores. Two different endings should not share a name.
  *
  * Last on the panel, under everything that keeps the building standing: it is
  * the one thing here that cannot be undone by another order, and it should be
@@ -116,12 +121,12 @@ const demolishSection = (state, b) => {
   if (!B.canDemolish(state, b).ok) return '';
   const order = { type: 'demolishBuilding', buildingId: b.id };
   const can = O.canEnqueue(state, order);
-  return '<h3>pull it down</h3>'
+  return '<h3>disassemble</h3>'
     + `<p class="note">The ground comes free and ${Math.round(C.BUILDING_REFUND * 100)}% of what was paid `
     + `comes back — ${costText(B.demolishRefund(b))}${b.upgraded ? ', the crew upgrade included' : ''}. `
     + `Whoever is manning it walks out.${b.type === 'excavation' && b.progress < C.EXCAVATION_TURNS
       ? ' The cache under it is given back undug.' : ''}</p>`
-    + btn('Pull it down', 'order', order, !can.ok)
+    + btn('Disassemble', 'order', order, !can.ok)
     + (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
 };
 
@@ -347,7 +352,7 @@ const VIEWS = {
       const can = O.canEnqueue(state, fix);
       h += btn('Rebuild', 'order', fix, !can.ok) + (can.ok ? '' : ` <span class="why">${esc(can.why)}</span>`);
       // A ruin is the one a player most often wants rid of rather than back, so
-      // the offer to pull it down is on this panel too — at the same rate, since
+      // the offer to disassemble it is on this panel too — at the same rate, since
       // they paid the same for it.
       h += demolishSection(state, b);
       return h;
@@ -1213,7 +1218,7 @@ export function summarise(events) {
       case 'cleared': out.push(`cleared ${e.tiles} tiles: +${e.wood} wood, +${e.stone} stone`); break;
       case 'built': out.push(`${e.what} stands at (${e.q}, ${e.r})`); break;
       case 'demolished':
-        out.push(`${e.what} at (${e.q}, ${e.r}) is pulled down — `
+        out.push(`${e.what} at (${e.q}, ${e.r}) is disassembled — `
           + `${Object.entries(e.refund).map(([k, v]) => `${v} ${k}`).join(', ')} back`);
         break;
       // Worth a line of its own: the hands are back in the pool this turn, and a
