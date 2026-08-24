@@ -6,6 +6,7 @@ import {
 } from '../sim/hex.js';
 import {
   tileAt, towerRange, towerManning, officerById, canopyShadow, isClearable, shipNetwork,
+  isBuildingManned,
 } from '../sim/state.js';
 import {
   queuedTiles, projectedAssignments, workableTiles, bridgeableTiles, projectedCrew, crewGroundAtResolve,
@@ -382,18 +383,36 @@ function drawStructures(ctx, state, cam, canvas, S) {
       }
       continue;
     }
-    // a ruin is drawn as what it is: the same ground, gone dark and broken up
-    ctx.fillStyle = bd.ruined ? 'rgba(74,66,60,0.85)'
-      : bd.complete ? 'rgba(150,150,148,0.85)' : 'rgba(150,150,148,0.4)';
+    // The premises themselves, as rects on their tiles: a ruin is drawn as what
+    // it is, the same ground gone dark and broken up. The shapes are gathered
+    // first because the glow underneath has to be thrown by the same outline —
+    // a square halo under a heap of rubble would read as a yard still standing.
+    const shapes = [];
     for (const t of bd.tiles) {
       const p = axialToScreen(cam, canvas, t.q, t.r);
       if (bd.ruined) {
-        ctx.fillRect(p.x - S * 0.6, p.y - S * 0.6, S * 1.2, S * 0.5);
-        ctx.fillRect(p.x - S * 0.2, p.y + S * 0.05, S * 0.8, S * 0.55);
+        shapes.push([p.x - S * 0.6, p.y - S * 0.6, S * 1.2, S * 0.5]);
+        shapes.push([p.x - S * 0.2, p.y + S * 0.05, S * 0.8, S * 0.55]);
       } else {
-        ctx.fillRect(p.x - S * 0.6, p.y - S * 0.6, S * 1.2, S * 1.2);
+        shapes.push([p.x - S * 0.6, p.y - S * 0.6, S * 1.2, S * 1.2]);
       }
     }
+    // Whether the yard is working, at a glance and from across the map: green
+    // where it is manned and earning, red where it is not — a site still being
+    // raised, a ruin, or premises standing short of the hands they need. The
+    // panel says the same in words on hover; this is so the eye finds the idle
+    // ones without hovering anything.
+    const live = isBuildingManned(state, bd);
+    ctx.save();
+    ctx.shadowColor = live ? 'rgba(110,220,120,0.95)' : 'rgba(226,84,60,0.95)';
+    ctx.shadowBlur = Math.max(5, S * 0.7);
+    ctx.fillStyle = live ? 'rgba(110,220,120,0.5)' : 'rgba(226,84,60,0.5)';
+    // twice over: one pass is a smudge at this blur, two make a halo that holds
+    for (let pass = 0; pass < 2; pass++) for (const r of shapes) ctx.fillRect(...r);
+    ctx.restore();
+    ctx.fillStyle = bd.ruined ? 'rgba(74,66,60,0.85)'
+      : bd.complete ? 'rgba(150,150,148,0.85)' : 'rgba(150,150,148,0.4)';
+    for (const r of shapes) ctx.fillRect(...r);
     // what is left of it, over the first tile
     if (!bd.ruined && bd.complete && bd.hp < bd.maxHp && S >= 8) {
       const p = axialToScreen(cam, canvas, bd.tiles[0].q, bd.tiles[0].r);
