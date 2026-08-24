@@ -1,9 +1,15 @@
 // Canvas: map, structures, cohorts, units. Reads sim state, never writes it.
 
 import C from '../sim/config.js';
-import { key, distance, axialToPixel, axialRound, spiral, neighbours } from '../sim/hex.js';
-import { tileAt, towerRange, towerManning, officerById, canopyShadow } from '../sim/state.js';
-import { queuedTiles, projectedAssignments, workableTiles, projectedCrew, crewGroundAtResolve } from '../sim/orders.js';
+import {
+  key, parseKey, distance, axialToPixel, axialRound, spiral, neighbours, NEIGHBOURS,
+} from '../sim/hex.js';
+import {
+  tileAt, towerRange, towerManning, officerById, canopyShadow, isClearable, shipNetwork,
+} from '../sim/state.js';
+import {
+  queuedTiles, projectedAssignments, workableTiles, bridgeableTiles, projectedCrew, crewGroundAtResolve,
+} from '../sim/orders.js';
 import { clearCapacity, jobPlace } from '../sim/labour.js';
 import {
   canBuildBuilding, canBuildTower, footprintPreview, coverageOf, coveredBuildings,
@@ -72,6 +78,7 @@ export function render(state, cam, canvas, ui) {
   // Same reason: the sim worked these sites this turn, and the reel has not
   // shown them yet.
   drawPending(ctx, cam, canvas, S, ui);
+  drawFeatureGlitter(ctx, state, cam, canvas, S, ui);
   drawStructures(ctx, state, cam, canvas, S);
   drawSpawners(ctx, state, cam, canvas, S);
   drawCohorts(ctx, state, cam, canvas, S, ui);
@@ -82,6 +89,9 @@ export function render(state, cam, canvas, ui) {
   // that becomes them.
   if (state.combat && !(ui && ui.reel)) drawCombat(ctx, state, cam, canvas, S);
   drawWorkedGround(ctx, state, cam, canvas, S, ui);
+  // What could be started, under what has been: the offer is the quietest thing
+  // on the map and everything the player has already decided is drawn over it.
+  drawAvailable(ctx, state, cam, canvas, S, ui);
   drawQueued(ctx, state, cam, canvas, S);
   drawBatchGlow(ctx, state, cam, canvas, S);
   drawCrew(ctx, state, cam, canvas, S, ui);
@@ -278,6 +288,58 @@ function drawPending(ctx, cam, canvas, S, ui) {
     diamond(ctx, p.x, p.y, Math.max(2, S * 0.32));
     ctx.fill();
   }
+}
+
+/**
+ * A twinkle on the points of interest a hand could work today.
+ *
+ * A marker says *there is something here*; it does not say whether anything can
+ * be done about it. A chest under standing forest and a chest on open ground
+ * are the same diamond, and the difference between them — one is two turns of
+ * work away, the other is a body's walk — is the whole of the decision. So the
+ * ones that are ready glitter and the ones that are not sit still.
+ *
+ * Drawn as its own pass rather than inside `drawFeatures`, because below the
+ * mid zooms the ground layer including the markers is baked once per map
+ * version, and this moves every frame.
+ */
+const GLITTER = [   // offset around the marker, phase, size — an uneven scatter
+  [-0.62, -0.40, 0.00, 0.16], [0.58, -0.52, 0.37, 0.13], [0.66, 0.34, 0.68, 0.15],
+  [-0.30, 0.64, 0.15, 0.12], [0.06, -0.76, 0.82, 0.11], [-0.70, 0.16, 0.55, 0.13],
+];
+
+function drawFeatureGlitter(ctx, state, cam, canvas, S, ui) {
+  if (S < 6 || (ui && ui.reel)) return;
+  const now = performance.now() / 1000;
+  const rows = visibleRows(cam, canvas, state.map.radius);
+  ctx.save();
+  for (const { r, qLo, qHi } of rows) {
+    for (let q = qLo; q <= qHi; q++) {
+      const t = state.map.tiles.get(key(q, r));
+      // Ready means: still unworked, something to do about it, and the ground
+      // over it already open — the same three the sim asks before it will take
+      // the order (`labour.featureReady`).
+      if (!t || !t.feature || t.featureWorked) continue;
+      if (!C.featureAction(t.feature) || isClearable(state, t)) continue;
+      const p = axialToScreen(cam, canvas, q, r);
+      const colour = FEATURE_COLOUR[t.feature] || FEATURE_COLOUR.cache;
+      // Each site keeps its own place in the cycle, so a row of chests does not
+      // blink in unison like a string of lights.
+      const own = ((q * 7 + r * 13) % 11) / 11;
+      ctx.shadowColor = colour;
+      ctx.shadowBlur = Math.max(3, S * 0.25);
+      ctx.fillStyle = colour;
+      for (const [dx, dy, phase, size] of GLITTER) {
+        const a = Math.sin((now * 1.6 + phase + own) * Math.PI * 2);
+        if (a <= 0) continue;                     // dark for half its cycle
+        ctx.globalAlpha = 0.2 + 0.8 * a;
+        const s = Math.max(1.5, S * size * (0.55 + 0.45 * a));
+        diamond(ctx, p.x + dx * S * 0.55, p.y + dy * S * 0.55, s);
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
 }
 
 // ---- player structures -----------------------------------------------------
@@ -722,6 +784,131 @@ function drawFacesLeft(ctx, state, cam, canvas, S) {
     ctx.textBaseline = 'middle';
     ctx.fillText(String(left), p.x + S * 0.55, p.y - S * 0.55 + 1);
   }
+}
+
+// ---- what could be started -------------------------------------------------
+
+/**
+ * The ground on offer: everything that could be queued for clearing right now,
+ * and every water tile that could be bridged, drawn as **one outline around the
+ * whole of it** rather than a box per tile.
+ *
+ * This is the one thing the map never said. The rule for what can be worked —
+ * clearable ground on or beside what the crew can walk to — is not visible in
+ * the terrain: a player looking at a forest has no way to tell whether it is the
+ * next tile of the frontier or three tiles past the end of it, and finds out by
+ * clicking and being refused.
+ *
+ * Per-tile boxes said the same thing and said it forty times over: a band of
+ * hatching across half the island, with the interior edges — the ones between
+ * two tiles that are both on offer, which carry no information at all — doing
+ * most of the shouting. Only the outer border is drawn, so what the eye gets is
+ * the shape of the offer: how far along the coast it runs, where the river cuts
+ * it, how deep into the wood it goes.
+ *
+ * A glimmer runs along it. Standing information that never moves stops being
+ * seen within a turn or two, and the line is faint enough to need the movement
+ * to be found at all; a wave travelling across the map is also the cheapest way
+ * to say "this is one thing", which a broken ring of dashes does not.
+ */
+const AVAILABLE_MIN_HEX = 5;   // below this the outline is smaller than its own line
+
+/**
+ * Which edge of the hex faces each neighbour.
+ *
+ * Corner `i` sits at `60i - 30` degrees, so edge `j` — corner `j` to corner
+ * `j+1` — faces `60j`. Matching by angle rather than by a written-out table:
+ * the two orderings are set in different files, and a table here would be a
+ * copy of an arrangement neither of them says out loud.
+ */
+const EDGE_FOR_NEIGHBOUR = NEIGHBOURS.map(([dq, dr]) => {
+  const p = axialToPixel(dq, dr, 1);
+  const deg = (Math.atan2(p.y, p.x) * 180) / Math.PI;
+  return ((Math.round(deg / 60) % 6) + 6) % 6;
+});
+
+let availableCache = { key: null, edges: [] };
+
+/**
+ * The outer border of the offered ground, as tile-and-edge pairs.
+ *
+ * Outer means outer. Three kinds of edge carry no information and none of them
+ * is drawn: between two offered tiles, which is the inside of the shape; against
+ * the ground the crew already hold — the ship's network, everything cut open,
+ * every beach and meadow they walk; and against anything already spoken for by
+ * the queue or by a body on their way to it. What is left is the edge where the
+ * offer meets ground that is *not* on it, which is the line worth having: the
+ * far side of the frontier, the river bank, the foot of the cliff.
+ *
+ * The union of both offers is walked at once, so the seam where cuttable ground
+ * meets bridgeable water — an interior edge of one shape, not a border of
+ * anything — is never drawn either. Each segment keeps the kind of the tile it
+ * belongs to, which is what colours it.
+ */
+function availableEdges(state) {
+  // The same key the batch glow uses: the offer moves when the ground moves,
+  // when the queue moves, or when a body is put on something.
+  const k = `${state.map.version}|${state.turn}|${state.orders.length}|${state.crew.assignments.length}|${state.ids}`;
+  if (availableCache.key === k) return availableCache.edges;
+  const kind = new Map();
+  for (const t of workableTiles(state)) kind.set(key(t.q, t.r), 'clear');
+  for (const t of bridgeableTiles(state)) kind.set(key(t.q, t.r), 'bridge');
+  // Ground that is already the player's business, in one set: nothing on the
+  // offer needs a line drawn against any of it.
+  const ours = new Set(shipNetwork(state));
+  for (const t of queuedTiles(state)) ours.add(key(t.q, t.r));
+  for (const a of projectedAssignments(state)) {
+    if (a.target && a.target.q !== undefined) ours.add(key(a.target.q, a.target.r));
+  }
+  const edges = [];
+  for (const [tk, what] of kind) {
+    const { q, r } = parseKey(tk);
+    for (let i = 0; i < NEIGHBOURS.length; i++) {
+      const [dq, dr] = NEIGHBOURS[i];
+      const nk = key(q + dq, r + dr);
+      if (kind.has(nk) || ours.has(nk)) continue;
+      edges.push({ q, r, e: EDGE_FOR_NEIGHBOUR[i], what });
+    }
+  }
+  availableCache = { key: k, edges };
+  return edges;
+}
+
+const AVAILABLE_COLOUR = { clear: [240, 226, 178], bridge: [150, 215, 250] };
+
+function drawAvailable(ctx, state, cam, canvas, S, ui) {
+  if (S < AVAILABLE_MIN_HEX) return;
+  if (ui && (ui.reel || ui.placing)) return;   // not mid-reel, nor under a shape being carried
+  if (state.phase !== 'player') return;
+  const edges = availableEdges(state);
+  if (!edges.length) return;
+
+  const now = performance.now() / 1000;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, S * 0.05);
+  ctx.lineCap = 'round';
+  for (const seg of edges) {
+    const p = axialToScreen(cam, canvas, seg.q, seg.r);
+    if (p.x < -S || p.y < -S || p.x > canvas.width + S || p.y > canvas.height + S) continue;
+    // One wave, running diagonally across the whole map at about a hex every
+    // three seconds, so neighbouring stretches of the border light in sequence
+    // rather than together — the light travels along the line instead of
+    // blinking it. Slow on purpose: it is there to be caught out of the corner
+    // of the eye, not to be watched.
+    const u = (p.x + p.y) / (S * 9) - now * 0.3;
+    const lit = 0.5 + 0.5 * Math.sin(u * Math.PI * 2);
+    const [cr, cg, cb] = AVAILABLE_COLOUR[seg.what];
+    ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${(0.3 + 0.55 * lit).toFixed(3)})`;
+    ctx.shadowColor = `rgba(${cr}, ${cg}, ${cb}, ${(0.5 * lit).toFixed(3)})`;
+    ctx.shadowBlur = S * 0.5 * lit;
+    const a = CORNERS[seg.e];
+    const b = CORNERS[(seg.e + 1) % 6];
+    ctx.beginPath();
+    ctx.moveTo(p.x + a[0] * S, p.y + a[1] * S);
+    ctx.lineTo(p.x + b[0] * S, p.y + b[1] * S);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // ---- the crew --------------------------------------------------------------

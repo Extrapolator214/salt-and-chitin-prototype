@@ -4,7 +4,8 @@
 import C from './config.js';
 import { tileAt, addLog, isBuildingManned, handsCap, handCount, totalPower, touchMap, landHands } from './state.js';
 import { applyQueue } from './orders.js';
-import { runLabour, runMovement } from './labour.js';
+import { runLabour, runMovement, standDownSurplus } from './labour.js';
+import { tickTowerMerges } from './build.js';
 import { runSpawners, advanceCohorts, escalate } from './enemy.js';
 import { tickAssaults } from './assault.js';
 import { beginCombat } from './combat.js';
@@ -13,6 +14,14 @@ import { beginCombat } from './combat.js';
 function completeConstruction(state, events) {
   for (const t of state.towers) if (!t.complete) { t.complete = true; }
   for (const b of state.buildings) if (!b.complete) { b.complete = true; }
+  // A Bunkhouse standing is a requirement dropped everywhere it reaches, so the
+  // crew it just made surplus walk out on the same turn — here rather than in
+  // the orders, because a crew upgrade bought in step 1 frees a hand the same
+  // way and both are settled by one look at what each house still wants.
+  standDownSurplus(state, events);
+  // A gun being raised is construction too — it is worked in its own yard while
+  // it fires, and it changes tier on the turn the work runs out.
+  tickTowerMerges(state, events);
   touchMap(state);
 }
 

@@ -90,6 +90,7 @@ export function renderHud(state, el) {
     // run is a thing you do to the whole run, and the seed both of them take is
     // read off the box they stand next to. Restart is the same island again —
     // the seed on the left of it — where New run is a different one.
+    + `<button id="devmenu" data-hud-action="dev">Dev menu</button>`
     + `<button id="restartmap" data-hud-action="restartMap">Restart map</button>`
     + `<button id="newrun" data-hud-action="newRun">New run</button>`;
 }

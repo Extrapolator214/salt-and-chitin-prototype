@@ -1443,6 +1443,61 @@ runSection('3.6', () => {
     s.base.hold.length = 0;
   }
   {
+    // Merging a fitting into the gun that already holds its twin. A tower is
+    // built at the tier of the fitting it takes and can only be handed a
+    // *higher* one — and above tier 1 nothing exists except by merging, so
+    // without this a tier-3 gun beside a tier-3 fitting is a dead button.
+    const s = St.createState(20260816);
+    s.res.wood = 1e6; s.res.stone = 1e6;
+    const spot = towerSpot(s);
+    B.addItem(s, 0, 3);
+    const tw = B.buildTower(s, spot.q, spot.r, 0);
+    tw.complete = true;
+    B.addItem(s, 0, 3);                       // its twin, out of the hold
+
+    t('a matching fitting cannot be fitted — it is not a higher tier',
+      !B.canFitItem(s, tw, 3).ok, B.canFitItem(s, tw, 3).why);
+    const can = O.canEnqueue(s, { type: 'mergeIntoTower', towerId: tw.id, tier: 3 });
+    t('but it can be merged into the gun', can.ok, can.why || 'ok');
+    t('a tier the gun is not holding is refused',
+      !O.canEnqueue(s, { type: 'mergeIntoTower', towerId: tw.id, tier: 2 }).ok);
+
+    const powerBefore = C.power(tw.tier);
+    O.enqueue(s, { type: 'mergeIntoTower', towerId: tw.id, tier: 3 });
+    const { events } = playTurn(s, true);
+    t('the work starts and the fitting leaves the hold',
+      !!tw.merging && tw.merging.toTier === 4 && !s.base.hold.length
+      && events.some((e) => e.kind === 'towerMerging'),
+      tw.merging ? `to tier ${tw.merging.toTier}, ${tw.merging.turnsLeft} turns left` : 'not started');
+    t('and the gun is the tier it was, still firing',
+      tw.tier === 3 && tw.itemTier === 3 && C.power(tw.tier) === powerBefore);
+    t('a second merge is refused while the first is being worked',
+      !O.canEnqueue(s, { type: 'mergeIntoTower', towerId: tw.id, tier: 3 }).ok);
+
+    // one resolve has already run — the one that started the work — so the
+    // count from the order is that turn plus however many are left
+    const during = [];
+    let guard = 0;
+    while (tw.merging && guard++ < 10) { during.push(tw.tier); playTurn(s, true); }
+    t(`the work runs ${C.TOWER_MERGE_TURNS} turns from the order, and the tier moves only at the end`,
+      during.length + 1 === C.TOWER_MERGE_TURNS && during.every((x) => x === 3)
+      && tw.tier === 4 && tw.itemTier === 4 && !tw.merging,
+      `tier through the work [3,${during}] -> ${tw.tier}`);
+    t('and the gun is worth more for it', C.power(tw.tier) > powerBefore,
+      `${powerBefore} -> ${C.power(tw.tier)}`);
+    t('tier 5 is the ceiling, and has nothing to merge into',
+      !B.canMergeIntoTower(s, { ...tw, tier: C.MAX_TIER, itemTier: C.MAX_TIER, merging: null }, C.MAX_TIER).ok);
+
+    // taking the emplacement down mid-merge gives both fittings back
+    B.addItem(s, 0, 4);
+    O.enqueue(s, { type: 'mergeIntoTower', towerId: tw.id, tier: 4 });
+    playTurn(s, true);
+    B.disassembleTower(s, tw);
+    t('a tower taken down mid-merge gives back both fittings',
+      s.base.hold.filter((it) => it.tower === 0 && it.tier === 4).length === 2,
+      `hold [${s.base.hold.map((it) => `t${it.tier}`)}]`);
+  }
+  {
     // A wide gun wants its whole yard on the day it goes up, and is refused
     // where the shape will not lie — at any tier, because the shape does not
     // move with the tier. Sand is the honest way to build that case: the crew
@@ -1751,6 +1806,35 @@ runSection('3.6d', () => {
     t('the body he was is on the list again the same phase, and walks nowhere',
       back.ok && !!again && again.kind === 'man' && again.arrivesOnTurn === again.leftOn,
       back.ok ? `left on ${again && again.leftOn}, arrives ${again && again.arrivesOnTurn}` : back.why);
+  }
+  {
+    // A Bunkhouse finished beside a full house is a place in its crew that no
+    // longer exists. The body in it is idle again the same turn, without the
+    // player having to notice and pick him off by hand.
+    const { s, b } = yard();
+    for (let i = 0; i < St.handsNeededFor(s, b); i++) {
+      O.enqueue(s, { type: 'assignMan', who: 'hand', targetId: b.id });
+    }
+    playTurn(s, true);
+    const before = St.buildingCrew(s, b);
+    const idleBefore = St.idleHands(s);
+    for (const h of H.spiral(b, C.BUNKHOUSE_RADIUS)) {
+      if (!B.canBuildBuilding(s, 'bunkhouse', h.q, h.r).ok) continue;
+      B.buildBuilding(s, 'bunkhouse', h.q, h.r);
+      break;
+    }
+    const { events } = playTurn(s, true);   // the Bunkhouse completes this turn
+    const need = St.handsNeededFor(s, b);
+    t('a Bunkhouse standing beside a full house sends the surplus home',
+      before === C.BUILDING_HANDS && need === C.BUILDING_HANDS_BUNKHOUSE
+      && St.buildingCrew(s, b) === need && St.idleHands(s) === idleBefore + 1,
+      `${before} standing, wants ${need}, ${St.buildingCrew(s, b)} left, ${idleBefore} idle -> ${St.idleHands(s)}`);
+    t('and the house is still manned, not emptied', St.isBuildingManned(s, b));
+    t('and the turn says who stood down', events.some((e) => e.kind === 'standDown' && e.freed.length === 1));
+    const again = playTurn(s, true);
+    t('a house already down to its crew loses nobody the turn after',
+      St.buildingCrew(s, b) === need && !again.events.some((e) => e.kind === 'standDown'),
+      `${St.buildingCrew(s, b)}/${need}`);
   }
   {
     // A house is the whole of its ground. A worker standing on the far corner

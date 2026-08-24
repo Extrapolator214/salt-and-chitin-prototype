@@ -297,6 +297,11 @@ const C = {
   // stone, but the gun itself is a tier-1 fitting out of the hold. Set false to
   // fall back to spec/04-economy.md, where the emplacement is the whole cost.
   TOWER_NEEDS_ITEM: true,
+  // v7: the fitting in the gun can be merged with a matching one out of the
+  // hold, which is the only way past the tier a tower was built at short of
+  // taking it down. It is work in the yard rather than a swap: three turns, and
+  // the gun goes on firing at the tier it has while they are done.
+  TOWER_MERGE_TURNS: 3,
   DISASSEMBLE_REFUND: 0.80,
   CLIFF_RANGE_BONUS: 1,
   MAX_TIER: 5,
@@ -521,7 +526,10 @@ const C = {
     cache: { count: 12, gold: 220, action: 'dig up' },
     spring: { count: 1, handsCap: 3 },
     officer: { count: 1, action: 'save' },
-    wreck: { count: 3, wood: 40, action: 'search' },
+    // A wreck is a ship, so she is carrying a ship's stores: her timbers, the
+    // iron out of her fittings, and what little was in the strongbox. Written
+    // as one line per resource and read out in that order everywhere.
+    wreck: { count: 3, wood: 60, iron: 30, gold: 10, action: 'search' },
   },
   FEATURE_MIN_APART: 6,
   CACHE_DIST: [6, 58],   // from the base, across a 2 x ISLAND_RADIUS island
@@ -538,6 +546,12 @@ const C = {
     { id: 'gunner', name: 'Master Gunner', verb: 'mans one tower alone, +50% power', role: 'man' },
     { id: 'sapper', name: 'Sapper Captain', verb: 'sabotage teams need 2 hands, not 4', role: 'assault' },
   ],
+  // Two of the four work from the roster: the Weapons Master's discount and the
+  // Sapper Captain's smaller teams apply because the man is in the company, not
+  // because he was put on a job. The other two are jobs — the Pioneer has to be
+  // sent to cut, the Gunner has to be stood in a tower — and the difference is
+  // worth saying on the line the player reads before deciding where he goes.
+  PASSIVE_ROLES: ['item', 'assault'],
   PIRATE_QUALITY: 0.55, // a random officer is worth this much of a unique
   PIRATE_NAMES: ['Rattlejack', 'Sil the Quiet', 'Bosun Crane', 'Mad Perrott', 'One-Eye Tace', 'Gallows Ryn'],
   // The hands. Nobody signs the articles under their own name, and most of
@@ -596,6 +610,15 @@ C.travelTurns = (dist) => C.TRAVEL.find((t) => dist <= t.within).turns;
 C.enemySpeed = (kind) => 1 / C.TERRAIN[kind].advance;
 /** Turns of one worker's labour to cut this ground; per-terrain, else the default. */
 C.turnsToClear = (terrain) => (C.TERRAIN[terrain] && C.TERRAIN[terrain].turns) || C.TURNS_PER_TILE;
+/** Does this officer's trade work from the roster rather than from a job? */
+C.isPassiveRole = (role) => C.PASSIVE_ROLES.includes(role);
+/**
+ * What an officer does, as it is shown. Built here rather than written into the
+ * verbs so that the pirate — whose verb is a sentence about a lieutenant's —
+ * is marked the same way, and so a run saved before the mark was added shows it
+ * too: the verb is stored, the mark is not.
+ */
+C.officerVerb = (o) => (o && C.isPassiveRole(o.role) ? `${o.verb} (passive)` : (o ? o.verb : ''));
 C.buildingDef = (type) => C.BUILDINGS.find((b) => b.type === type);
 /** The fixed shape of a building of n tiles: axial offsets from its anchor. */
 C.buildingShape = (n) => C.BUILDING_SHAPES[n] || C.BUILDING_SHAPES[1];

@@ -15,6 +15,10 @@
 
 const MAP_KEY = 'salt-n-chitin/map';
 const RUN_KEY = 'salt-n-chitin/run';
+// Settings, not a run. Kept in a key of its own and never cleared with the run:
+// a player who has said "stop asking me" has said it about the game, not about
+// the island they happened to be on when they said it.
+const PREFS_KEY = 'salt-n-chitin/prefs';
 // Bumped when a stored run stops meaning what it says: `decode` refuses anything
 // written under an older number rather than trying to translate it. 2 dropped
 // the `unassign` order, which standing down no longer queues — a run stored
@@ -142,6 +146,32 @@ export function load() {
     console.warn('[save] the stored run would not load:', e && e.message);
     return null;
   }
+}
+
+/**
+ * The settings, with the defaults for anything never set.
+ *
+ * `idleWarning` is the only one so far: whether ending a turn with somebody
+ * standing about stops to say so. It survives a new run and a reload, which is
+ * the whole point of a box that can be turned off.
+ */
+export const PREF_DEFAULTS = { idleWarning: true };
+
+export function loadPrefs() {
+  const ls = store();
+  if (!ls) return { ...PREF_DEFAULTS };
+  try {
+    const raw = JSON.parse(ls.getItem(PREFS_KEY) || '{}');
+    return { ...PREF_DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
+  } catch {
+    return { ...PREF_DEFAULTS };
+  }
+}
+
+export function savePrefs(prefs) {
+  const ls = store();
+  if (!ls) return false;
+  try { ls.setItem(PREFS_KEY, JSON.stringify(prefs)); return true; } catch { return false; }
 }
 
 /** Throw the stored run away — a new run is starting over the top of it. */

@@ -559,12 +559,17 @@ is within **0.2 points** of target on 50 consecutive seeds (the harness allows 2
 
 Four unique lieutenants sail with the run, and a fifth is found on the island:
 
-| officer | verb |
-|---|---|
-| Master Pioneer | clears 3 tiles a turn unaided |
-| Weapons Master | items cost 25% less |
-| Master Gunner | mans one tower alone, +50% power |
-| Sapper Captain | assault teams need 2 hands, not 4 |
+| officer | verb | |
+|---|---|---|
+| Master Pioneer | clears 3 tiles a turn unaided | a job: he has to be sent to cut |
+| Weapons Master | items cost 25% less | **passive** — from the roster |
+| Master Gunner | mans one tower alone, +50% power | a job: he has to stand in the tower |
+| Sapper Captain | assault teams need 2 hands, not 4 | **passive** — from the roster |
+
+Two of the four work whether or not they are given anything to do, and the
+interface says so: `C.officerVerb` marks a passive trade `(passive)` wherever a
+verb is shown, rather than the mark being written into the verbs — so the pirate
+copy of a passive trade carries it too.
 
 The Sapper Captain is the fourth because `00-constants.md` §10 already names him
 ("2 with a Sapper Captain — not in this build"). The other candidates from the
@@ -1077,7 +1082,7 @@ So the payout is its own order. Each point of interest has a verb, in
 
 | feature | action | what it gives |
 |---|---|---|
-| shipwreck | search | 40 wood |
+| shipwreck | search | 60 wood, 30 iron, 10 gold |
 | treasure cache | dig up | 220 gold |
 | officer site | save | the fifth officer joins |
 | freshwater spring | *(held, not worked)* | +3 hands cap while someone stands on it |

@@ -287,7 +287,7 @@ export function canBuildTower(state, q, r, towerIndex, tier) {
   if (claimedTiles(state).has(key(q, r))) return no('a structure is queued there');
   if (!isBuildable(state, t, true)) {
     if (t.terrain === 'sand' || t.terrain === 'salt') return no(`no footing on ${t.terrain}`);
-    if (t.terrain === 'freshwater') return no('bridge it first');
+    if (t.terrain === 'freshwater') return no(t.bridge ? 'a bridge is a crossing, not footing' : 'fresh water');
     if (t.terrain === 'saltwater') return no('saltwater');
     return no('clear it first');
   }
@@ -354,6 +354,7 @@ export function buildTower(state, q, r, towerIndex, want) {
     essence: [def.essence], itemTier: C.TOWER_NEEDS_ITEM ? tier : 0,
     footprint,
     complete: false,
+    merging: null,          // { toTier, turnsLeft } while a fitting is worked in
   };
   state.towers.push(tower);
   occupy(state, tower.footprint, { kind: 'tower', id: tower.id });
@@ -380,6 +381,56 @@ export function fitItem(state, tower, tier) {
   return displaced;
 }
 
+/**
+ * Merging a fitting into a gun that already holds its twin.
+ *
+ * A tower is built at the tier of the fitting it takes and could never rise
+ * except by being handed a *higher* one — which is exactly the tier nobody
+ * holds, because everything above tier 1 is made by merging. So the same rule
+ * the hold plays by is offered to the gun: two of a kind at the same tier make
+ * one of the next, and the one already in the yard counts as one of the two.
+ *
+ * It is work, not a swap, so it takes `TOWER_MERGE_TURNS` and the gun keeps
+ * firing at the tier it has until they are done. The item is taken out of the
+ * hold when the work starts — it is in the yard being worked, not on the shelf.
+ */
+export function canMergeIntoTower(state, tower, tier) {
+  if (!tower) return no('gone');
+  if (tower.evolved) return no('evolved towers take no items');
+  if (!tower.complete) return no('not built yet');
+  if (tower.merging) return no(`already rising to tier ${tower.merging.toTier}`);
+  if (!tower.itemTier) return no('nothing fitted to merge with');
+  if (tier !== tower.itemTier) return no(`its fitting is tier ${tower.itemTier}`);
+  if (tier >= C.MAX_TIER) return no(`tier ${C.MAX_TIER} is the ceiling`);
+  if (!countOf(state, tower.towerIndex, tier)) return no(`no tier-${tier} ${C.itemName(tower.towerIndex)} in the hold`);
+  return ok;
+}
+
+export function startTowerMerge(state, tower, tier) {
+  takeItem(state, tower.towerIndex, tier);
+  tower.merging = { toTier: tier + 1, turnsLeft: C.TOWER_MERGE_TURNS };
+  return tower.merging;
+}
+
+/**
+ * A turn's work on every gun being raised, run with the rest of construction.
+ * The tier changes on the turn the work finishes and not before, so everything
+ * that reads a tower's power, range or manning goes on reading the old one
+ * throughout — which is what "it keeps firing" means.
+ */
+export function tickTowerMerges(state, events) {
+  for (const tw of state.towers) {
+    if (!tw.merging) continue;
+    if (--tw.merging.turnsLeft > 0) continue;
+    const tier = tw.merging.toTier;
+    tw.merging = null;
+    tw.tier = tier;
+    tw.itemTier = tier;
+    events.push({ kind: 'towerMerged', id: tw.id, what: C.TOWERS[tw.towerIndex].name, tier, q: tw.q, r: tw.r });
+    addLog(state, `${C.TOWERS[tw.towerIndex].name} at (${tw.q},${tw.r}) rises to tier ${tier}`);
+  }
+}
+
 export function disassembleTower(state, tower) {
   release(state, tower.footprint);
   state.towers.splice(state.towers.indexOf(tower), 1);
@@ -391,6 +442,10 @@ export function disassembleTower(state, tower) {
   state.res.wood += refund.wood;
   state.res.stone += refund.stone;
   if (tower.itemTier > 0) state.base.hold.push({ tower: tower.towerIndex, tier: tower.itemTier });
+  // A merge under way is a second fitting lying in the yard, half worked into
+  // the first. Taking the tower down gives it back rather than eating it — the
+  // player is undoing the emplacement, not scrapping the gun.
+  if (tower.merging) state.base.hold.push({ tower: tower.towerIndex, tier: tower.merging.toTier - 1 });
   return refund;
 }
 

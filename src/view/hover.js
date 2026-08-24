@@ -96,6 +96,10 @@ function towerBlock(state, id) {
   s += pair('tier', tw.evolved ? 'evolved' : tw.tier, 'power', towerPower(state, tw).toFixed(2));
   s += pair('range', towerRange(state, tw), 'item', tw.itemTier ? `tier ${tw.itemTier}` : 'none');
   s += row('fire', def.fire);
+  if (tw.merging) {
+    s += row('being raised', `to tier ${tw.merging.toTier}, ${tw.merging.turnsLeft} turn`
+      + `${tw.merging.turnsLeft === 1 ? '' : 's'} left — it fires throughout`);
+  }
   s += row('essence', tw.essence.join(' + '));
   s += row('manned by', `${m.crew.map((a) => a.who).join(', ') || 'nobody'} (${m.crew.length}/${m.need})`);
   return s;

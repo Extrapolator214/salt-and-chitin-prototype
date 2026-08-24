@@ -56,7 +56,7 @@ terrains are not simply tripled, and both are noted in the table.
 | `sand` | **no** | 0 | **no** | yes | 2.0 | yes | |
 | `meadow` | **no** | 0 | **yes, uncut** | yes | 1.5 | yes | open grass — crew walk it uncut, and a swarm in contact crosses it. The only ground built on without clearing first, and it never becomes road |
 | `salt` | **no** | 0 | **no** | yes | 1.0 | yes | +25% damage taken, no regeneration |
-| `freshwater` | bridgeable | 0 | no | **no** | — | — | shown as *fresh water*; bridge costs 65 wood |
+| `freshwater` | bridgeable | 0 | **no, bridged or not** | **no until bridged** | 1.0 bridged | — | shown as *fresh water*; bridge costs 65 wood and buys a crossing, not footing |
 | `cliff` | **no** | 0 | **towers only** | **no** | — | — | +1 tower range |
 | `saltwater` | no | 0 | no | no | — | — | shown as *salt water*; the ocean, plus 1–2 bays or straits |
 
@@ -146,12 +146,15 @@ Loss condition: `hull <= 0`.
 | manning by tier | t1–3: 1 hand · t4: 2 · t5: 2 · evolved: 3 |
 | footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below |
 | `TOWER_BUILD_COST` | 30 wood + 20 stone, plus one fitting of its kind from the hold, any tier |
-| `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory |
+| `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory (and one being merged in) |
+| `TOWER_MERGE_TURNS` | 3 — a matching fitting merged into the gun, which fires throughout |
 | `CLIFF_RANGE_BONUS` | +1 tile |
 
 **A tower is built at the tier of the fitting it takes**, and the lowest tier
 held is the one taken. It rises from there by having a higher-tier item fitted
-in place; the displaced item returns to inventory.
+in place; the displaced item returns to inventory — or by merging a matching
+fitting into the one already in the gun, which takes `TOWER_MERGE_TURNS` turns
+and leaves the gun firing at its old tier until the work is done.
 
 An **unmanned tower stands and does not fire.** That is a legal board state.
 
@@ -395,7 +398,7 @@ healing.
 | treasure cache | 12 | 100 gold, worked by an Excavation Camp over 10 turns |
 | freshwater spring | 1 | +3 to `HANDS_CAP` while a hand stands on it |
 | officer site | 1 | at ~0.5r, visible from turn 1; reaching it with a hand recruits a 4th officer |
-| shipwreck | 3 | 40 wood on first clear, then a buildable platform |
+| shipwreck | 3 | 60 wood, 30 iron, 10 gold on first clear, then a buildable platform |
 
 ---
 
@@ -403,11 +406,14 @@ healing.
 
 Three, all available from turn 1, all assignable to any manning slot.
 
-| officer | verb |
-|---|---|
-| **Master Pioneer** | clears 3 tiles a turn by himself |
-| **Weapons Master** | items cost 25% less |
-| **Master Gunner** | mans one tower alone and gives it +50% power |
+| officer | verb | |
+|---|---|---|
+| **Master Pioneer** | clears 3 tiles a turn by himself | a job |
+| **Weapons Master** | items cost 25% less | **passive** |
+| **Master Gunner** | mans one tower alone and gives it +50% power | a job |
+
+A passive trade applies because the officer is in the company; it is shown as
+`(passive)` beside the verb.
 
 An officer **replaces a hand one for one** and gives their bonus only in their
 own role. The 4th officer, from the map site, is a randomised copy of one of the

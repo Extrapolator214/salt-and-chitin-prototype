@@ -7,14 +7,16 @@ import {
   tileAt, towerRange, towerPower, towerManning, isBuildingManned, handsNeededFor,
   assignmentsFor, arrived, holdCap, holdFree, hasBuilding, idleHands, idleOfficers,
   buildingsOfType, isBuildable, officerById, handCount, crewName, isClearable, isOpenGround,
-  memberById,
+  memberById, DEV_FLAGS, devFlag,
 } from '../sim/state.js';
 import * as O from '../sim/orders.js';
 import { tileLabel } from '../sim/orders.js';
 import * as B from '../sim/build.js';
 import * as A from '../sim/assault.js';
 import { evolutionPartners } from '../sim/build.js';
-import { clearCapacity, nearestIdle, pickNearest, crewRoute, jobPlace } from '../sim/labour.js';
+import {
+  clearCapacity, nearestIdle, pickNearest, crewRoute, jobPlace, haulOf, haulText, walkTurns,
+} from '../sim/labour.js';
 import { outcomeText } from '../sim/turn.js';
 import { networkReaches } from '../sim/enemy.js';
 import * as art from './ascii.js';
@@ -80,6 +82,14 @@ export function renderModal(state, el, backdrop, ui) {
     };
   });
 }
+
+// What each cheat is for, in the player's terms rather than the flag's.
+const DEV_WHY = {
+  instantTravel: 'a walk of any length costs no turns — they start work the turn they are given the job',
+  walkAnywhere: 'standing wood and scrub are crossed as if open. Cliff, unbridged water, '
+    + 'the sea and boulders still are not, and the cohorts are not affected',
+};
+const DEV_GRANT = 100;
 
 const row = (cells, off, why) =>
   `<tr class="${off ? 'off' : ''}">${cells.map((c) => `<td>${c}</td>`).join('')}` +
@@ -180,7 +190,7 @@ const VIEWS = {
         h += row([
           `<b style="color:${d.colour}">${d.name}</b>`,
           `(${tw.q}, ${tw.r})`,
-          tw.evolved ? 'evolved' : `tier ${tw.tier}`,
+          tw.evolved ? 'evolved' : `tier ${tw.tier}${tw.merging ? ` &rarr; ${tw.merging.toTier} in ${tw.merging.turnsLeft}` : ''}`,
           `${towerPower(state, tw).toFixed(2)} dps`,
           m.manned ? `manned ${m.crew.length}/${m.need}` : `<span class="why">unmanned ${m.crew.length}/${m.need}</span>`,
           btn('Open', 'openTower', { id: tw.id }) + ' ' + btn('locate', 'locate', { q: tw.q, r: tw.r }),
@@ -204,6 +214,12 @@ const VIEWS = {
     h += `<tr><th>manning</th><td colspan="3">${m.crew.length}/${m.need}${m.gunner ? ' — the Master Gunner alone, +50% power' : ''} ${m.manned ? '' : '<span class="why">not firing</span>'}</td></tr>`;
     h += '</table>';
 
+    if (tw.merging) {
+      h += `<p class="note">Being raised to <b>tier ${tw.merging.toTier}</b> — `
+        + `${tw.merging.turnsLeft} turn${tw.merging.turnsLeft === 1 ? '' : 's'} of work left. `
+        + 'It fires at the tier it has while the work goes on.</p>';
+    }
+
     h += `<h3>fit a ${esc(C.itemName(tw.towerIndex))}</h3>`;
     const mine = state.base.hold.filter((it) => it.tower === tw.towerIndex);
     if (!mine.length) h += `<p class="note">no ${esc(C.itemName(tw.towerIndex))} in the hold — this tower takes no other kind</p>`;
@@ -211,6 +227,19 @@ const VIEWS = {
     for (let tier = 1; tier <= C.MAX_TIER; tier++) {
       const n = mine.filter((it) => it.tier === tier).length;
       if (!n) continue;
+      // A fitting of the tier already in the gun cannot be fitted — it is not
+      // higher — but it is the one that can be merged into it. Offer the thing
+      // that can be done rather than the thing that cannot: a dead Fit button
+      // beside a matching pair is the interface refusing to say what it is for.
+      if (tier === tw.itemTier && tier < C.MAX_TIER) {
+        const merge = { type: 'mergeIntoTower', towerId: id, tier };
+        const cm = O.canEnqueue(state, merge);
+        h += row([`tier ${tier}`, `x${n}`,
+          `-> tier ${tier + 1}, power ${C.power(tier + 1).toFixed(2)}`,
+          `${C.manningFor(tier + 1)} hands`,
+          btn(`Merge to tier ${tier + 1}`, 'order', merge, !cm.ok)], !cm.ok, cm.ok ? '' : cm.why);
+        continue;
+      }
       const order = { type: 'fitItem', towerId: id, tier };
       const can = O.canEnqueue(state, order);
       h += row([`tier ${tier}`, `x${n}`,
@@ -218,6 +247,10 @@ const VIEWS = {
         btn('Fit', 'order', order, !can.ok)], !can.ok, can.ok ? '' : can.why);
     }
     h += '</table>';
+    if (tw.itemTier && tw.itemTier < C.MAX_TIER) {
+      h += `<p class="note">A matching tier-${tw.itemTier} fitting merges with the one in the gun: `
+        + `${C.TOWER_MERGE_TURNS} turns of work in the yard, and the gun fires throughout.</p>`;
+    }
 
     h += '<h3>manning</h3><table>';
     for (const w of workerChoices(state)) {
@@ -243,7 +276,11 @@ const VIEWS = {
       h += '</table>';
     }
 
-    h += `<h3>disassemble</h3><p class="note">refunds ${Math.round(C.DISASSEMBLE_REFUND * 100)}% of ${costText(C.TOWER_COST)}${tw.itemTier ? ', and the tier-' + tw.itemTier + ' item' : ''}</p>`;
+    // Both fittings come back when a merge is under way: the one in the gun and
+    // the one being worked into it.
+    const backTiers = [tw.itemTier, tw.merging ? tw.merging.toTier - 1 : 0].filter(Boolean);
+    h += `<h3>disassemble</h3><p class="note">refunds ${Math.round(C.DISASSEMBLE_REFUND * 100)}% of ${costText(C.TOWER_COST)}`
+      + `${backTiers.length ? `, and the ${backTiers.map((x) => `tier-${x}`).join(' and ')} item${backTiers.length > 1 ? 's' : ''}` : ''}</p>`;
     h += btn('Disassemble', 'orderClose', { type: 'disassembleTower', towerId: id });
     return h;
   },
@@ -528,7 +565,7 @@ const VIEWS = {
     return h + '</table>';
   },
 
-  crew(state) {
+  crew(state, props, ui) {
     // Named to the body that will actually take each job, so a queued "a hand"
     // row says which hand and that hand is not also listed as standing about.
     const { tasks, busy } = O.projectedRoster(state);
@@ -557,12 +594,51 @@ const VIEWS = {
       if (busy.has(m.id)) continue;
       const officer = officerById(state, m.id);
       h += row([officer ? `<b>${esc(m.name)}</b>` : esc(m.name), 'idle',
-        officer ? `<span class="note">${esc(officer.verb)}</span>` : `standing at (${m.q},${m.r})`,
+        officer ? `<span class="note">${esc(C.officerVerb(officer))}</span>` : `standing at (${m.q},${m.r})`,
         'free', locateBtn(state, m.id)]);
     }
     h += '</table>';
     h += '<p class="note">To put someone to work: shift-click a tile to clear it, or open a tower or building and man it. ' +
       'A worker has to be able to walk there, so ground cut off by river, cliff or boulder cannot be worked until a way is opened.</p>';
+    // The way back. A reminder turned off inside the box that raised it has no
+    // other door, and a setting with no way back on is a trap rather than a
+    // choice — this is the panel about the crew standing about, so it goes here.
+    if (ui && ui.prefs && !ui.prefs.idleWarning) {
+      h += `<p class="note">Ending a turn with idle crew no longer stops to ask. `
+        + `${btn('Remind me again', 'setPref', { key: 'idleWarning', value: true })}</p>`;
+    }
+    return h;
+  },
+
+  /**
+   * The dev menu: cheats, off the bar, for looking at parts of a run that would
+   * otherwise take an hour of play to reach.
+   *
+   * Everything here takes effect the moment it is pressed and says so in the
+   * log — there is no queue, no turn, and no confirmation. The flags are part
+   * of the run and are written down with it, so a reload comes back cheating in
+   * exactly the same way.
+   */
+  dev(state) {
+    let h = '<h2>Dev menu</h2>';
+    h += '<p class="note">Cheats. They take effect at once, they are written into the saved run, '
+      + 'and every one of them is logged.</p>';
+    h += '<table>';
+    for (const [flag, label] of Object.entries(DEV_FLAGS)) {
+      const on = devFlag(state, flag);
+      h += row([
+        `<label><input type="checkbox" data-x="toggleDev" `
+        + `data-arg='${esc(JSON.stringify({ flag, on: !on }))}'${on ? ' checked' : ''}> ${esc(label)}</label>`,
+        `<span class="note">${esc(DEV_WHY[flag] || '')}</span>`, '', '', '',
+      ]);
+    }
+    h += '</table>';
+    h += '<h3>stores</h3><table>';
+    for (const res of ['wood', 'stone', 'iron', 'gold']) {
+      h += row([res, `<b>${state.res[res]}</b> held`, '', '',
+        btn(`Add ${DEV_GRANT} ${res}`, 'devGrant', { res, amount: DEV_GRANT })]);
+    }
+    h += '</table>';
     return h;
   },
 
@@ -580,7 +656,7 @@ const VIEWS = {
     h += '<table>';
     for (const m of officers) {
       const o = officerById(state, m.id);
-      h += row([`<b>${esc(m.name)}</b>`, `<span class="note">${esc(o ? o.verb : '')}</span>`, `(${m.q},${m.r})`, '', '']);
+      h += row([`<b>${esc(m.name)}</b>`, `<span class="note">${esc(C.officerVerb(o))}</span>`, `(${m.q},${m.r})`, '', '']);
     }
     if (hands.length) {
       h += row([`${hands.length} hand${hands.length === 1 ? '' : 's'}`,
@@ -588,8 +664,11 @@ const VIEWS = {
         `${hands.length > 6 ? `, and ${hands.length - 6} more` : ''}</span>`, '', '', '']);
     }
     h += '</table>';
-    h += `<p>${btn('End the turn anyway', 'endTurn')} ${btn('Go back', 'close')}</p>`;
+    h += `<p>${btn('End the turn anyway', 'endTurn')} ${btn('Go back', 'close')}`
+      + ` ${btn('End it, and stop reminding me', 'endTurnSilently')}</p>`;
     h += '<p class="note">Shift-click a tile to put the next hand on it, or open a tower or building and man it.</p>';
+    h += '<p class="note">Turning the reminder off is a setting, not a decision about this turn: '
+      + 'it stays off across runs, and the crew panel turns it back on.</p>';
     return h;
   },
 
@@ -900,7 +979,7 @@ function workerChoices(state, to) {
   const tasks = O.projectedAssignments(state);
   for (const o of state.crew.officers) {
     const mine = tasks.filter((a) => a.who === o.id);
-    if (!mine.length) { out.push({ id: o.id, spoken, label: `<b>${esc(o.name)}</b> — ${esc(o.verb)}` }); continue; }
+    if (!mine.length) { out.push({ id: o.id, spoken, label: `<b>${esc(o.name)}</b> — ${esc(C.officerVerb(o))}` }); continue; }
     const cap = clearCapacity(state, o.id);
     const clears = mine.filter((a) => a.kind === 'clear');
     if (cap > 1 && clears.length === mine.length && clears.length < cap) {
@@ -952,7 +1031,7 @@ function walkFor(state, w, to) {
   const route = crewRoute(state, m, to, w.held);
   if (!route.reachable) return { tiles: 0, turns: Infinity, sameTrip: false, reachable: false };
   return {
-    tiles: route.steps.length - 1, turns: sameTrip ? 0 : C.travelTurns(route.cost), sameTrip, reachable: true,
+    tiles: route.steps.length - 1, turns: sameTrip ? 0 : walkTurns(state, route.cost), sameTrip, reachable: true,
   };
 }
 
@@ -1058,7 +1137,7 @@ const FEATURE_WORD = { cache: 'chest', wreck: 'wreck', officer: 'castaway', spri
 const featureWord = (kind) => FEATURE_WORD[kind] || kind;
 
 function featurePrize(kind) {
-  if (kind === 'wreck') return `${C.FEATURES.wreck.wood} wood`;
+  if (kind === 'wreck') return haulText(haulOf(C.FEATURES.wreck));
   if (kind === 'cache') return `${C.FEATURES.cache.gold} gold`;
   if (kind === 'officer') return 'a fifth officer joins the company';
   return '';
@@ -1081,6 +1160,12 @@ export function summarise(events) {
     switch (e.kind) {
       case 'cleared': out.push(`cleared ${e.tiles} tiles: +${e.wood} wood, +${e.stone} stone`); break;
       case 'built': out.push(`${e.what} stands at (${e.q}, ${e.r})`); break;
+      // Worth a line of its own: the hands are back in the pool this turn, and a
+      // player who does not know that leaves them unspent.
+      case 'standDown':
+        out.push(`${e.freed.length} stand${e.freed.length === 1 ? 's' : ''} down and ${e.freed.length === 1 ? 'is' : 'are'} idle again — `
+          + `${e.freed.map((f) => `${f.who} (${f.what})`).join(', ')}`);
+        break;
       case 'produced': out.push(`production: ${e.iron ? `+${e.iron} iron ` : ''}${e.gold ? `+${e.gold} gold` : ''}`); break;
       case 'cache': out.push(`a treasure cache pays out ${e.gold} gold`); break;
       case 'flareLanded': out.push(`a boat lands — ${e.count * C.FLARE_HANDS} hands, ${e.hands} in all`); break;
@@ -1097,11 +1182,15 @@ export function summarise(events) {
       case 'spawnerDied': out.push(`the ${e.spawner} is destroyed`); break;
       case 'refused': out.push(`order refused — ${e.why}`); break;
       case 'feature':
-        if (e.feature === 'wreck') out.push(`the shipwreck is searched — ${e.wood} wood`);
+        if (e.feature === 'wreck') out.push(`the shipwreck is searched — ${haulText(e.haul)}`);
         else if (e.feature === 'cache') out.push(`a chest is dug up — ${e.gold} gold`);
         else if (e.feature === 'officer') out.push('the castaway is saved');
         break;
       case 'officer': out.push(`${e.name} joins the company`); break;
+      case 'towerMerging':
+        out.push(`${e.what} is being raised to tier ${e.tier} — ${e.turns} turns, and it fires throughout`);
+        break;
+      case 'towerMerged': out.push(`${e.what} at (${e.q}, ${e.r}) rises to tier ${e.tier}`); break;
       case 'fitted': out.push(`a tier-${e.tier} item is fitted${e.displaced ? `, a tier-${e.displaced} item returns to the hold` : ''}`); break;
       case 'evolved': out.push(`${e.name} evolves`); break;
       default: break;
@@ -1188,5 +1277,14 @@ const ACTIONS = {
     }
     ui.newRun(seed);
   },
+  // The dev menu. Both of these go through `ui` rather than touching the state
+  // here, because what makes them "instant" is the same refresh that writes the
+  // run down — see main.js.
+  toggleDev(state, payload, ui) { ui.dev.flag(payload.flag, payload.on); },
+  devGrant(state, payload, ui) { ui.dev.grant(payload.res, payload.amount); },
   endTurn(state, payload, ui) { current = null; ui.endTurn(); },
+  // The one setting the player can reach from inside a box that has interrupted
+  // them, because that box is the only place they will ever want it.
+  endTurnSilently(state, payload, ui) { ui.setPref('idleWarning', false); current = null; ui.endTurn(); },
+  setPref(state, payload, ui) { ui.setPref(payload.key, payload.value); ui.refresh(); },
 };

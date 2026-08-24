@@ -12,6 +12,18 @@
   <div id="middle">
     <canvas id="map"></canvas>
     <div id="log"></div>
+    <!-- The contact runs on the map, so it reports from the top of the map:
+         under the bar and against the side column, where the eye already is
+         when the fight starts. Its buttons are built once and only its text is
+         written per frame — see renderStrip. -->
+    <div id="combat-strip" hidden>
+      <div class="strip-head">
+        <span id="strip-title"></span>
+        <span class="spacer"></span>
+        <button data-s="1">1x</button><button data-s="3">3x</button>
+      </div>
+      <div id="strip-body"></div>
+    </div>
     <div id="side">
       <div id="hover" class="panel"></div>
       <div id="queue" class="panel"></div>
@@ -39,8 +51,6 @@
     <button data-action="endturn" id="endturn">End Turn <kbd>Space</kbd></button>
   </div>
 </div>
-
-<div id="combat-strip" hidden></div>
 
 <div id="backdrop" hidden><div id="modal"></div></div>
 

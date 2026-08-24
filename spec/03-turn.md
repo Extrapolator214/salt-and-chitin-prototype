@@ -52,7 +52,8 @@ Execute exactly this sequence.
 ```
 1.  apply the order queue in the order given; refund anything now invalid
 2.  labour: each clear assignment clears its tiles; credit yields
-3.  construction: towers, buildings, bridges complete
+3.  construction: towers, buildings, bridges complete; crew a house no longer
+    needs stand down and are idle again
 4.  buildings produce: Forge, Trading Dock, Excavation Camp
 5.  flares in flight land; hands added
 6.  assaults: march ticks, arrivals resolve

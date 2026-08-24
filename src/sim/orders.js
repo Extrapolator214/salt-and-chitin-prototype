@@ -12,7 +12,7 @@ import {
 import * as B from './build.js';
 import {
   assign, unassign as dropAssignment, recomputeCapBonus, clearCapacity, levelBatch,
-  travelTurnsFor, jobPlace, pickNearest,
+  travelTurnsFor, jobPlace, pickNearest, haulOf,
 } from './labour.js';
 import * as A from './assault.js';
 
@@ -222,6 +222,34 @@ export function workableTiles(state) {
   return [...out.values()];
 }
 
+/**
+ * The water the crew could bridge right now: fresh water on, or beside, ground
+ * they can already reach, and not already spoken for by a bridge in the queue.
+ *
+ * The order itself asks for less than this — any unbridged fresh water on the
+ * map is legal, since a bridge is paid for in wood and not in walking. The
+ * frontier rule is the map's, not the sim's: every river tile on the island lit
+ * at once is not an offer, it is wallpaper, and the ones worth offering are the
+ * ones somebody could actually walk to and start.
+ */
+export function bridgeableTiles(state) {
+  const reach = reachForWork(state);
+  const queued = new Set(
+    state.orders.filter((o) => o.type === 'buildBridge').map((o) => key(o.q, o.r)),
+  );
+  const out = new Map();
+  const offer = (nk) => {
+    if (out.has(nk) || queued.has(nk)) return;
+    const t = state.map.tiles.get(nk);
+    if (t && t.terrain === 'freshwater' && !t.bridge) out.set(nk, t);
+  };
+  for (const k of reach) {
+    const { q, r } = parseKey(k);
+    for (const d of NEIGHBOURS) offer(key(q + d[0], r + d[1]));
+  }
+  return [...out.values()];
+}
+
 /** Every tile the queue has spoken for, so the map can mark them. */
 export function queuedTiles(state) {
   const out = [];
@@ -344,7 +372,7 @@ export const ORDERS = {
     gain: (state, o) => {
       const t = tileAt(state, o.target.q, o.target.r);
       if (!t || !t.feature || t.featureWorked) return NO_COST;
-      if (t.feature === 'wreck') return { wood: C.FEATURES.wreck.wood };
+      if (t.feature === 'wreck') return haulOf(C.FEATURES.wreck);
       if (t.feature === 'cache') return { gold: C.FEATURES.cache.gold };
       return NO_COST;
     },
@@ -427,6 +455,30 @@ export const ORDERS = {
       const displaced = B.fitItem(state, tower, o.tier);
       events.push({ kind: 'fitted', tier: o.tier, displaced, id: tower.id });
       addLog(state, `${C.TOWERS[tower.towerIndex].name} rises to tier ${tower.tier}`);
+    },
+  },
+
+  // The tier a tower was built at is otherwise the tier it dies at: a fitting
+  // above tier 1 only exists by merging, and merging happens on the shelf. This
+  // is that same merge with the gun's own fitting as one of the two — see
+  // `build.canMergeIntoTower`.
+  mergeIntoTower: {
+    label: (o, state) => {
+      const tower = state.towers.find((t) => t.id === o.towerId);
+      return `merge a tier-${o.tier} fitting into ${tower ? C.TOWERS[tower.towerIndex].name : 'a tower'}`;
+    },
+    cost: () => NO_COST,
+    check: (state, o) => {
+      const tower = state.towers.find((t) => t.id === o.towerId);
+      if (!tower) return no('gone');
+      return B.canMergeIntoTower(state, tower, o.tier);
+    },
+    apply: (state, o, events) => {
+      const tower = state.towers.find((t) => t.id === o.towerId);
+      const work = B.startTowerMerge(state, tower, o.tier);
+      events.push({ kind: 'towerMerging', id: tower.id, what: C.TOWERS[tower.towerIndex].name, tier: work.toTier, turns: work.turnsLeft });
+      addLog(state, `${C.TOWERS[tower.towerIndex].name} at (${tower.q},${tower.r}) is being raised to tier ${work.toTier}`
+        + ` — ${work.turnsLeft} turns, and it fires throughout`);
     },
   },
 
@@ -711,7 +763,10 @@ export function incomeNextTurn(state) {
   // a wreck or a chest pays the turn the worker reaches it — nothing is banked
   // on it, one turn of standing there is the whole job
   for (const t of prizes) {
-    if (t.feature === 'wreck') bump('wood', C.FEATURES.wreck.wood);
+    if (t.feature === 'wreck') {
+      const haul = haulOf(C.FEATURES.wreck);
+      for (const res of Object.keys(haul)) bump(res, haul[res]);
+    }
     if (t.feature === 'cache') bump('gold', C.FEATURES.cache.gold);
   }
   return out;
@@ -911,6 +966,11 @@ export function projectedItems(state) {
         towerTier.set(o.towerId, o.tier);
         break;
       }
+      // The fitting leaves the hold when the work starts; the tower's own tier
+      // does not move for another two turns, so `towerTier` is left alone.
+      case 'mergeIntoTower':
+        take(towerKind.get(o.towerId), o.tier);
+        break;
       case 'disassembleTower': {
         const kind = towerKind.get(o.towerId);
         const prev = towerTier.get(o.towerId) || 0;
@@ -949,6 +1009,20 @@ function checkAgainstQueue(state, order) {
       // tier-4 fittings, and the second is refused if only one was ever held.
       return has(order.towerIndex, order.tier)
         ? ok : no(`no tier-${order.tier} ${C.itemName(order.towerIndex)} in the hold`);
+    }
+    case 'mergeIntoTower': {
+      const kind = towerKind.get(order.towerId);
+      if (kind === undefined) return no('already queued for removal');
+      if (state.orders.some((o) => o.type === 'mergeIntoTower' && o.towerId === order.towerId)) {
+        return no('already queued to be raised');
+      }
+      // Against the tier the gun will be holding once the queue has run: a
+      // fitting queued into it this turn changes which tier there is a twin of.
+      const cur = towerTier.get(order.towerId);
+      if (cur !== order.tier) return no(`its fitting will be tier ${cur}`);
+      // A fitting queued to be fitted or spent elsewhere is not in the hold to
+      // be merged, which is the whole point of asking the projection.
+      return has(kind, order.tier) ? ok : no(`no tier-${order.tier} ${C.itemName(kind)} in the hold`);
     }
     case 'disassembleTower': case 'evolve':
       return towerTier.has(order.towerId) ? ok : no('already queued for removal');

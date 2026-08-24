@@ -71,6 +71,18 @@ const ui = {
   // `1`, `3`, or `'skip'` — which is not a speed at all but the same decision
   // made once: resolve the turn and get on with it, with nothing to watch.
   reelSpeed: 1,
+  // Settings that outlive the run, off localStorage. `idleWarning` is the box
+  // that stops End Turn when somebody is standing about, and the box itself is
+  // where it gets turned off.
+  prefs: save.loadPrefs(),
+  setPref: (k, v) => { ui.prefs[k] = v; save.savePrefs(ui.prefs); },
+  // The dev menu's two doors into the sim. They take effect on the spot and are
+  // written down on the spot: `refresh` is what saves the run, so a cheat is
+  // saved by the same call that redraws the panel it was pressed in.
+  dev: {
+    flag: (name, on) => { St.setDevFlag(state, name, on); refresh(); },
+    grant: (res, amount) => { St.devGrant(state, res, amount); refresh(); },
+  },
   located: null,       // a tile pinned by "locate", until the next click
   revoke: (id) => { O.revoke(state, id); refresh(); },
   place: (what) => { ui.placing = what; refresh(); },
@@ -225,12 +237,14 @@ const escape = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '
 
 /**
  * Ending the turn with bodies standing about is nearly always a mistake, so it
- * asks first. `confirmed` is the answer coming back from that modal.
+ * asks first. `confirmed` is the answer coming back from that modal — and the
+ * player can turn the asking off from inside the box, which is the only place
+ * anybody ever wants to turn it off from.
  */
 function endTurn(confirmed = false) {
   if (state.phase !== 'player') return;
   const spare = O.projectedHands(state) + O.projectedIdleOfficers(state).length;
-  if (spare > 0 && !confirmed) {
+  if (spare > 0 && !confirmed && ui.prefs.idleWarning) {
     if (modals.currentModal() && modals.currentModal().name === 'idleWarning') return;
     return modals.open('idleWarning', {}, ui);
   }
@@ -413,22 +427,28 @@ function finishTurn() {
 
 // ---- the combat strip ------------------------------------------------------
 
+// The strip is written every frame, so nothing inside it that can be pressed may
+// be written every frame: an element replaced between the mousedown and the
+// mouseup never gets a click, which is why the speeds did nothing. The markup
+// stands in index.html and is bound here once; only the text is written.
+const stripTitle = document.getElementById('strip-title');
+const stripBody = document.getElementById('strip-body');
+const stripSpeeds = [...strip.querySelectorAll('[data-s]')];
+stripSpeeds.forEach((b) => { b.onclick = () => setSpeed(b.dataset.s); });
+
 function renderStrip() {
   const cb = state.combat;
   if (!cb) { strip.hidden = true; return; }
   strip.hidden = false;
   const e = cb.groups[0].entry;
   const alive = cb.groups.reduce((n, g) => n + g.units.filter((u) => u.alive).length, 0);
-  strip.innerHTML =
-    `CONTACT — entry at (${e.q}, ${e.r})` +
-    `        <button data-s="1">1x</button><button data-s="3">3x</button><button data-s="skip">skip</button>\n` +
+  stripTitle.textContent = `CONTACT — entry at (${e.q}, ${e.r})`;
+  stripBody.textContent =
     `cohort: ${cb.startCount} units (${cb.composition.grub} grub, ${cb.composition.shell} shell` +
     `${cb.composition.elite ? `, ${cb.composition.elite} elite` : ''})     ` +
     `standing ${alive}     killed ${cb.killed}     leaked ${cb.leaked}\n` +
     `elapsed ${cb.elapsed.toFixed(1)} s${cb.groups[0].overland ? '   (no road path — they come overland)' : ''}`;
-  strip.querySelectorAll('[data-s]').forEach((b) => {
-    b.onclick = () => setSpeed(b.dataset.s);
-  });
+  stripSpeeds.forEach((b) => b.classList.toggle('on', Number(b.dataset.s) === cb.speed));
 }
 
 function setSpeed(s) {
@@ -588,11 +608,13 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') { ui.placing = null; modals.close(ui); refresh(); return; }
   if (e.key === ' ') { e.preventDefault(); endTurn(); return; }
+  // The contact adds keys, it does not take the map away: a fight you are only
+  // watching is exactly when you want to pan over to it, and the number keys do
+  // not collide with anything the camera uses.
   if (state.phase === 'combat') {
     if (e.key === '1') setSpeed('1');
     if (e.key === '2') setSpeed('3');
     if (e.key === '3') setSpeed('skip');
-    return;
   }
   const step = 60;
   const k = e.key.toLowerCase();

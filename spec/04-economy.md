@@ -52,8 +52,20 @@ range ring drawn around it. It cannot be built:
 
 ### Rising
 
-A tower rises by having a **higher-tier item fitted in place**. The displaced
-item returns to inventory. There is no other way to reach tier 2+.
+A tower rises two ways.
+
+- A **higher-tier item fitted in place**. The displaced item returns to
+  inventory. Instant, on the turn the order resolves.
+- A **matching item merged into the one already in the gun**: the same rule the
+  hold plays by — two of a kind at the same tier make one of the next — with the
+  fitted item as one of the two. This is work in the yard rather than a swap: it
+  takes `TOWER_MERGE_TURNS` (3) turns, the item leaves the hold when the work
+  starts, and **the gun goes on firing at the tier it has** until the last turn,
+  when the tier changes. A tower taken down mid-merge gives both fittings back.
+
+Merging is the route that matters in practice: above tier 1 no item exists
+except by merging, so a gun built at tier 3 will rarely meet a tier-4 fitting to
+be handed — but it will often be standing beside its own twin.
 
 | tier | power | manning |
 |---:|---:|---:|
@@ -129,6 +141,12 @@ Bunkhouse), one turn to build. Upgrading to run unmanned costs **50 gold**.
 | Bunkhouse | 2 | manning | buildings within radius 3 cost 1 hand |
 
 Excavation Camp and Bunkhouse may be built repeatedly; the rest are one each.
+
+**A requirement that falls sends the surplus home.** A Bunkhouse finished within
+reach, or a crew upgrade paid for, drops what a house wants by a hand — and the
+hand already standing in it is stood down that same turn (step 3) rather than
+left manning a job that no longer exists. Whoever is still walking to the house
+goes first, then the last one put on.
 
 **The dock counter.** Beside its standing trade, a manned Trading Dock buys and
 sells wood, stone and iron to order in whatever amount. It is instant — no turn,

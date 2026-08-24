@@ -145,5 +145,6 @@ once in a resolve, both are shown.
 - Enemy pathing re-evaluates on the **same turn**, so a path opened this turn is
   walkable this turn.
 - `sand`, `salt`, `freshwater`, `cliff` and `saltwater` cannot be cleared.
-- `freshwater` can be **bridged**: 65 wood, one turn, makes that tile passable and
-  buildable. A bridge is not road and yields nothing.
+- `freshwater` can be **bridged**: 65 wood, one turn, makes that tile passable —
+  and only passable. A bridge is a crossing, not ground: nothing can be built on
+  it, it is not road, and it yields nothing.

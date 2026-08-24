@@ -29,6 +29,10 @@ export function createState(seed) {
     base: { q: island.base.q, r: island.base.r, hull: C.HULL_MAX, hold: [] },
     res: { wood: 0, stone: 0, iron: 0, gold: 0 },
 
+    // The dev menu's cheats. Part of the run, so they are saved with it — see
+    // `DEV_FLAGS`.
+    dev: { instantTravel: false, walkAnywhere: false },
+
     crew: {
       cap: C.HANDS_CAP,
       capBonus: 0,
@@ -192,7 +196,10 @@ export function isBuildable(state, tile, forTower = false) {
   // an unworked spring or officer site is not ground to build over
   if (!tile || tile.occupant) return false;
   if (!tile.featureWorked && (tile.feature === 'spring' || tile.feature === 'officer')) return false;
-  if (tile.bridge) return true;
+  // A bridge is a crossing, not ground. It carries the crew and the cohorts over
+  // a river tile and nothing else: there is still water under it, and a gun or a
+  // yard wants footing rather than planks.
+  if (tile.bridge) return false;
   const def = C.TERRAIN[tile.terrain];
   if (def.buildable === 'towers') return forTower;
   if (!def.buildable) return false;
@@ -336,6 +343,66 @@ export function isCrewGround(state, tile) {
   return !blocksCrew(state, tile);
 }
 
+// ---- the dev menu ----------------------------------------------------------
+
+/**
+ * Cheats, off by default, kept in the run.
+ *
+ * In the run and not beside it: they change what the sim will do, so a saved
+ * run has to carry them or it comes back a different game from the one that was
+ * put down. That also makes them free to save — the run is written on every
+ * refresh already.
+ *
+ * They are read through `devFlag` rather than off `state.dev` directly, because
+ * every run stored before the menu existed has no `dev` on it at all.
+ */
+export const DEV_FLAGS = {
+  instantTravel: 'no distance limit for units',
+  walkAnywhere: 'units walk through unopened ground',
+};
+
+export const devFlag = (state, name) => !!(state && state.dev && state.dev[name]);
+
+export function setDevFlag(state, name, on) {
+  if (!DEV_FLAGS[name]) return false;
+  if (!state.dev) state.dev = {};
+  state.dev[name] = !!on;
+  // The reach and the offer on the map are both read off the map's version, and
+  // `walkAnywhere` changes both without moving a single tile.
+  touchMap(state);
+  addLog(state, `dev: ${DEV_FLAGS[name]} — ${on ? 'on' : 'off'}`);
+  return true;
+}
+
+/**
+ * Ground the cheat lets the crew cross that their own rules would not.
+ *
+ * Standing wood and scrub — ground that is *unopened* rather than *unwalkable*.
+ * What nothing can walk is still refused: cliff, unbridged water, the sea, and
+ * boulders, all of which say so in their own `passable`. So the cheat opens the
+ * island up without letting anybody stroll across a river.
+ */
+export const devCrossable = (state, tile) =>
+  devFlag(state, 'walkAnywhere') && !!tile && isPassable(state, tile);
+
+/** Everywhere a worker may stand or pass, the cheat included. */
+export function crewMayCross(state, tile) {
+  if (isCrewGround(state, tile)) return true;
+  if (!devCrossable(state, tile)) return false;
+  if (tile.occupant && tile.occupant.kind === 'spawner') return false;
+  return !blocksCrew(state, tile);
+}
+
+/** A dev grant: resources out of nowhere, and said out loud in the log. */
+export function devGrant(state, res, amount) {
+  if (state.res[res] === undefined) return false;
+  state.res[res] += amount;
+  // Deliberately not counted in `stats`: the end of the run reports what the
+  // island gave up, and this did not come off the island.
+  addLog(state, `dev: +${amount} ${res}`);
+  return true;
+}
+
 /**
  * Everywhere a worker can get to from the ship over open ground.
  *
@@ -420,6 +487,17 @@ function jobTile(state, a) {
 export function walkableForWork(state, held = crewHeld(state)) {
   const set = new Set(walkableFromBase(state));
   const queue = [];
+  // With `walkAnywhere` on, the ship's own network is a starting line rather
+  // than a boundary: the flood below leaves it wherever the ground is passable,
+  // so every tile of it is a place to leave from. The enemy's approach is not
+  // touched by any of this — it asks `shipNetwork`, which stays strict.
+  if (devFlag(state, 'walkAnywhere')) {
+    for (const k of set) {
+      const p = parseKey(k);
+      const t = tileAt(state, p.q, p.r);
+      if (t) queue.push(t);
+    }
+  }
   for (const k of held) {
     if (set.has(k)) continue;
     set.add(k);
@@ -433,7 +511,7 @@ export function walkableForWork(state, held = crewHeld(state)) {
       const k = key(n.q, n.r);
       if (set.has(k)) continue;
       const t = state.map.tiles.get(k);
-      if (!isCrewGround(state, t) && !held.has(k)) continue;
+      if (!crewMayCross(state, t) && !held.has(k)) continue;
       set.add(k);
       queue.push(t);
     }

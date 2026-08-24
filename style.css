@@ -73,9 +73,12 @@ html, body {
 /* Last things on the bar, sized off it rather than off the action row: the bar is
    one line tall and a full-size button would set the height of the whole thing.
    They sit as a pair, so only the first of them takes the gap from the census. */
-#restartmap, #newrun { flex: none; padding: 1px 8px; line-height: 1.4; }
-#restartmap { margin-left: 16px; }
-#newrun { margin-left: 6px; }
+#devmenu, #restartmap, #newrun { flex: none; padding: 1px 8px; line-height: 1.4; }
+#devmenu { margin-left: 16px; }
+#restartmap, #newrun { margin-left: 6px; }
+/* Not part of the game: the cheats sit next to the run buttons because that is
+   where the whole-run controls are, and read as something else. */
+#devmenu { color: var(--dim); }
 
 #middle { display: flex; flex: 1 1 auto; min-height: 0; position: relative; }
 #map { flex: 1 1 auto; min-width: 0; display: block; cursor: crosshair; }
@@ -206,13 +209,26 @@ kbd { color: var(--dim); font-size: 11px; }
 .shop .btns button { width: 100%; text-align: left; font-size: 11px; padding: 2px 6px; }
 .shop .why { min-height: 14px; font-size: 11px; color: var(--bad); }
 
+/* Top of the map, not the bottom of the screen: the contact is the one thing
+   happening while it is up, and it reads with the bar above it rather than a
+   screen away from it. Right edge against the side column, which is 370px, so
+   the tile panel beside it stays whole. Over the feed, whose oldest lines it
+   would otherwise sit under. */
 #combat-strip {
-  position: fixed; left: 0; right: 280px; bottom: 0;
-  border-top: 1px solid var(--edge); background: rgba(20, 22, 26, .94);
-  padding: 6px 10px; z-index: 5; white-space: pre-wrap;
+  position: absolute; left: 0; right: 370px; top: 0;
+  border-bottom: 1px solid var(--edge); background: rgba(20, 22, 26, .94);
+  padding: 6px 10px; z-index: 6;
 }
 #combat-strip[hidden] { display: none; }
-#combat-strip button { margin-left: 6px; }
+/* Only the numbers are preformatted. On the strip as a whole it turned the
+   newlines between the elements in the markup into blank lines of their own. */
+#combat-strip #strip-body { white-space: pre-wrap; }
+/* The speeds sit on the title line, pushed to the far end of it by the spacer,
+   so the numbers underneath them are never moved about by a button. */
+#combat-strip .strip-head { display: flex; align-items: center; gap: 6px; }
+#combat-strip .strip-head .spacer { flex: 1; }
+#combat-strip button { padding: 1px 8px; line-height: 1.4; }
+#combat-strip button.on { background: #2f3742; color: #fff; }
 
 .q-row { display: flex; justify-content: space-between; gap: 6px; }
 .q-row button { padding: 0 6px; line-height: 1.2; }

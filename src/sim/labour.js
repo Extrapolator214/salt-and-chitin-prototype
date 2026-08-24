@@ -5,7 +5,7 @@ import { distance, key, neighbours } from './hex.js';
 import {
   tileAt, terrainDef, isClearable, touchMap, addLog, arrived, nextId, drawPick,
   officerById, memberById, idleMembers, isHand, landCrew, isOpenGround,
-  crewHeld, blocksCrew, walkableFromBase,
+  crewHeld, blocksCrew, walkableFromBase, handsNeededFor, crewName, devCrossable, devFlag,
 } from './state.js';
 import { Heap } from './enemy.js';
 
@@ -70,16 +70,40 @@ export function featureReady(state, tile) {
   return !isClearable(state, tile);
 }
 
+/**
+ * A haul, and how it is read out.
+ *
+ * The wreck pays in three resources rather than one, and four places tell the
+ * player about it — the log, the turn summary, the reel's splash and the tile
+ * panel. They take the amounts from here rather than each naming their own, so
+ * changing what a wreck is worth is a line in the config and nothing else.
+ */
+export const HAUL_ORDER = ['wood', 'stone', 'iron', 'gold'];
+
+/** The resource lines of a feature's spec, in reading order, zeroes dropped. */
+export function haulOf(spec) {
+  const haul = {};
+  for (const res of HAUL_ORDER) if (spec[res]) haul[res] = spec[res];
+  return haul;
+}
+
+/** `60 wood, 30 iron, 10 gold` */
+export const haulText = (haul) =>
+  HAUL_ORDER.filter((res) => haul && haul[res]).map((res) => `${haul[res]} ${res}`).join(', ');
+
 /** One crew member works out what the tile was holding. */
 export function workFeature(state, tile, events) {
   if (!tile || !tile.feature || tile.featureWorked) return null;
   tile.featureWorked = true;
   const kind = tile.feature;
   if (kind === 'wreck') {
-    state.res.wood += C.FEATURES.wreck.wood;
-    state.stats.woodEarned += C.FEATURES.wreck.wood;
-    events.push({ kind: 'feature', feature: 'wreck', q: tile.q, r: tile.r, wood: C.FEATURES.wreck.wood });
-    addLog(state, `the shipwreck at (${tile.q},${tile.r}) is searched — ${C.FEATURES.wreck.wood} wood`);
+    const haul = haulOf(C.FEATURES.wreck);
+    for (const res of Object.keys(haul)) {
+      state.res[res] += haul[res];
+      state.stats[`${res}Earned`] += haul[res];
+    }
+    events.push({ kind: 'feature', feature: 'wreck', q: tile.q, r: tile.r, haul });
+    addLog(state, `the shipwreck at (${tile.q},${tile.r}) is searched — ${haulText(haul)}`);
   } else if (kind === 'cache') {
     state.res.gold += C.FEATURES.cache.gold;
     state.stats.goldEarned += C.FEATURES.cache.gold;
@@ -170,7 +194,10 @@ function stepCost(state, tile, held) {
   if (on === 'spawner') return null;
   if (held.has(key(tile.q, tile.r))) return 1;
   if (on === 'tower' || on === 'building' || on === 'base') return 1;
-  return isOpenGround(tile) ? 1 : null;
+  // The dev cheat lets them cross unopened ground, and nothing else: the two
+  // refusals above still stand, and so does everything the terrain itself
+  // refuses to carry — see `state.devCrossable`.
+  return isOpenGround(tile) || devCrossable(state, tile) ? 1 : null;
 }
 
 /**
@@ -305,8 +332,15 @@ export function travelTurnsFor(state, who, to, held) {
   const m = memberById(state, who);
   if (!m || !to) return Infinity;
   const route = crewRoute(state, m, to, held);
-  return route.reachable ? C.travelTurns(route.cost) : Infinity;
+  return route.reachable ? walkTurns(state, route.cost) : Infinity;
 }
+
+/**
+ * Turns of walking for a route of this cost — the one place the dev menu's
+ * `instantTravel` takes the distance out of a march. A walk nobody can make is
+ * still a walk nobody can make: the cheat is about the clock, not about the way.
+ */
+export const walkTurns = (state, cost) => (devFlag(state, 'instantTravel') ? 0 : C.travelTurns(cost));
 
 /**
  * What the walk to one place costs from everywhere, in a single search.
@@ -475,7 +509,7 @@ export function assign(state, { kind, who, target, at, sameTripAs, held }) {
     // tiles the worker is already on.
     const route = crewRoute(state, m, jobPlace(state, { kind, target }, m) || at, held);
     if (!route.reachable) return null;
-    turns = C.travelTurns(route.cost);
+    turns = walkTurns(state, route.cost);
   }
   const a = {
     id: nextId(state, 'as'),
@@ -488,6 +522,45 @@ export function assign(state, { kind, who, target, at, sameTripAs, held }) {
   };
   state.crew.assignments.push(a);
   return a;
+}
+
+/**
+ * Send home whoever a building no longer needs.
+ *
+ * Manning is a standing order, but what a house *wants* is not: a Bunkhouse
+ * finished within reach of it, or its own crew upgrade paid for, takes a hand
+ * off the requirement — and leaves a body standing in a yard that has no work
+ * for them. Nobody would ever choose to leave them there, and there is nothing
+ * on the screen that says they could go, so the resolve stands them down rather
+ * than making it a chore to notice.
+ *
+ * Whoever is still walking goes first: a hand on the road to a job that no
+ * longer exists loses the least by turning round. After that it is the last one
+ * put on, so a crew that has been standing a while is left where it is.
+ *
+ * The sweep asks what every building wants rather than what the Bunkhouse just
+ * changed, because the two ways a requirement falls — the Bunkhouse and the
+ * upgrade — are the same surplus, and a house can be over-manned by both at once.
+ *
+ * Not to be confused with `orders.standDown`, which is the player picking one
+ * worker off one job. This is the resolve tidying up after itself.
+ */
+export function standDownSurplus(state, events) {
+  const freed = [];
+  for (const b of state.buildings) {
+    const on = state.crew.assignments.filter((a) => a.kind === 'man' && a.target === b.id);
+    const spare = on.length - handsNeededFor(state, b);
+    if (spare <= 0) continue;
+    const order = [...on].sort((x, y) => (arrived(state, x) - arrived(state, y)) || (y.leftOn - x.leftOn));
+    for (const a of order.slice(0, spare)) {
+      unassign(state, a.id);
+      freed.push({ who: crewName(state, a.who), what: C.buildingDef(b.type).name });
+    }
+  }
+  if (!freed.length) return freed;
+  events.push({ kind: 'standDown', freed });
+  for (const f of freed) addLog(state, `${f.who} stands down — the ${f.what} no longer needs the hand`);
+  return freed;
 }
 
 export function unassign(state, id) {

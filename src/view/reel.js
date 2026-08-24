@@ -14,7 +14,7 @@
 // walking dot is watching for.
 
 import C from '../sim/config.js';
-import { crewRoute, jobPlace } from '../sim/labour.js';
+import { crewRoute, jobPlace, haulText } from '../sim/labour.js';
 import { findPath } from '../sim/enemy.js';
 import { tileAt } from '../sim/state.js';
 import { axialToPixel, key } from '../sim/hex.js';
@@ -202,7 +202,7 @@ export function build(state, events, before) {
     beats.push({
       kind: 'poi',
       feature: e.feature,
-      wood: e.wood, gold: e.gold,
+      haul: e.haul, gold: e.gold,
       name: e.feature === 'officer' && joined ? joined.name : null,
       trade: e.feature === 'officer' && joined ? joined.trade : null,
       focus: { q: e.q, r: e.r },
@@ -389,7 +389,7 @@ const pane = (title, body, note = '') =>
 function poiPane(b) {
   if (b.feature === 'wreck') {
     return pane('a shipwreck is searched', art.WRECK,
-      `<b>+${b.wood}</b> wood out of her ribs`);
+      `<b>${haulText(b.haul)}</b> out of her ribs`);
   }
   if (b.feature === 'cache') {
     return pane('a chest is dug up', art.CACHE,
