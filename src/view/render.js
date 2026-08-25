@@ -16,6 +16,7 @@ import {
   canBuildBuilding, canBuildTower, footprintPreview, coverageOf, coveredBuildings,
 } from '../sim/build.js';
 import { cohortTiles, cohortHidden } from '../sim/enemy.js';
+import * as A from '../sim/assault.js';
 import { hexSize, axialToScreen, visibleRows, worldToScreen } from './camera.js';
 
 const SQRT3 = Math.sqrt(3);
@@ -81,7 +82,7 @@ export function render(state, cam, canvas, ui) {
   drawPending(ctx, cam, canvas, S, ui);
   drawFeatureGlitter(ctx, state, cam, canvas, S, ui);
   drawStructures(ctx, state, cam, canvas, S);
-  drawSpawners(ctx, state, cam, canvas, S);
+  drawSpawners(ctx, state, cam, canvas, S, ui);
   drawCohorts(ctx, state, cam, canvas, S, ui);
   drawAssaults(ctx, state, cam, canvas, S);
   // Held back for as long as the reel runs. The contact has already happened in
@@ -498,9 +499,13 @@ function drawLocated(ctx, cam, canvas, S, ui) {
   ctx.restore();
 }
 
-function drawSpawners(ctx, state, cam, canvas, S) {
+function drawSpawners(ctx, state, cam, canvas, S, ui) {
+  // A spawner killed this turn is held on the island until the mission's own
+  // box has said so — the same rule a dug chest goes by. The map is the last
+  // place a player should learn what happened, not the first.
+  const held = (ui && ui.holdSpawners) || null;
   for (const sp of state.spawners) {
-    if (!sp.alive) continue;
+    if (!sp.alive && !(held && held.has(sp.id))) continue;
     ctx.fillStyle = 'rgba(160,40,36,0.9)';
     ctx.beginPath();
     for (const t of sp.footprint) {
@@ -563,24 +568,74 @@ function drawCohorts(ctx, state, cam, canvas, S, ui) {
 }
 
 function drawAssaults(ctx, state, cam, canvas, S) {
-  if (!state.assaults.length) return;
-  const from = axialToScreen(cam, canvas, state.base.q, state.base.r);
+  if (!state.assaults.length && !state.orders.some((o) => o.type === 'scheduleAssault')) return;
   ctx.save();
-  ctx.setLineDash([6, 5]);
-  for (const a of state.assaults) {
-    const sp = state.spawners.find((s) => s.id === a.targetSpawnerId);
-    if (!sp) continue;
-    const to = axialToScreen(cam, canvas, sp.q, sp.r);
-    ctx.strokeStyle = a.state === 'march' ? 'rgba(240,220,150,0.8)' : 'rgba(200,90,70,0.8)';
+
+  // Missions the queue is about to start. Drawn the same way and dimmer: the
+  // staging ground is ground the player did not pick and has not seen, and it
+  // is worth seeing while sending the team is still a decision.
+  for (const p of A.plannedStagings(state)) {
+    const at = axialToScreen(cam, canvas, p.staging.q, p.staging.r);
+    ctx.setLineDash([3, 3]);
+    ctx.strokeStyle = 'rgba(240,220,150,0.55)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
+    ctx.arc(at.x, at.y, Math.max(4, S * 0.55), 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#f0dc96';
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-    ctx.fillText(`${a.state} ${a.turnsRemaining}`, (from.x + to.x) / 2, (from.y + to.y) / 2);
+    const sp = axialToScreen(cam, canvas, p.spawner.q, p.spawner.r);
+    ctx.setLineDash([2, 6]);
+    ctx.beginPath();
+    ctx.moveTo(at.x, at.y);
+    ctx.lineTo(sp.x, sp.y);
+    ctx.stroke();
+    if (S >= 5) {
+      ctx.fillStyle = 'rgba(240,220,150,0.75)';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.fillText('mission ordered', at.x, at.y - Math.max(4, S * 0.55) - 2);
+    }
+  }
+
+  for (const a of state.assaults) {
+    const sp = state.spawners.find((s) => s.id === a.targetSpawnerId);
+    if (!sp || !a.staging) continue;
+    const to = axialToScreen(cam, canvas, a.staging.q, a.staging.r);
+    const gathering = a.state === 'gather';
+
+    // The staging ground itself, ringed. It is a tile the player chose nothing
+    // about and has to be able to find: the mission is happening there, the
+    // team is walking there, and clicking it is how the mission is called off.
+    ctx.setLineDash([]);
+    ctx.strokeStyle = gathering ? 'rgba(240,220,150,0.9)' : 'rgba(200,90,70,0.9)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(to.x, to.y, Math.max(4, S * 0.55), 0, Math.PI * 2);
+    ctx.stroke();
+
+    // The bodies walking to it are joined to it by `jobLines`, the same way a
+    // worker is joined to the face he is going to cut — one rule for every job
+    // on the island, and the mission is a job.
+
+    // The last two tiles, to the spawner: what the gathering is *for*.
+    const at = axialToScreen(cam, canvas, sp.q, sp.r);
+    ctx.setLineDash([2, 6]);
+    ctx.strokeStyle = 'rgba(200,90,70,0.8)';
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(at.x, at.y);
+    ctx.stroke();
+
+    if (S >= 5) {
+      ctx.fillStyle = '#f0dc96';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      const done = gathering ? A.assaultTeam(state, a)
+        .filter((who) => { const m = state.crew.members.find((x) => x.id === who);
+          return m && m.q === a.staging.q && m.r === a.staging.r; }).length : 0;
+      const label = gathering ? `gathering ${done}/${a.hands + (a.leader ? 1 : 0)}`
+        : a.state === 'strike' ? 'going in' : a.state;
+      ctx.fillText(label, to.x, to.y - Math.max(4, S * 0.55) - 2);
+    }
   }
   ctx.restore();
 }
@@ -981,9 +1036,20 @@ export function jobLines(state) {
   const k = projectionKey(state);
   if (lineCache.key === k) return lineCache.map;
   const out = new Map();
-  const { byOrder } = projectedCrew(state, crewGroundAtResolve(state));
+  const held = crewGroundAtResolve(state);
+  const { byOrder, teams } = projectedCrew(state, held);
+  // A sabotage mission, queued: every body that will walk to the staging ground
+  // is joined to it, exactly as a queued clear joins a worker to a face. Some
+  // of them are beside it and some are four turns off, and which is which is
+  // the thing the player is deciding about.
+  for (const { at, team } of teams.values()) {
+    for (const who of team) {
+      const m = state.crew.members.find((x) => x.id === who);
+      if (!m || out.has(who) || (m.q === at.q && m.r === at.r)) continue;
+      out.set(who, { q: at.q, r: at.r });
+    }
+  }
   for (const a of projectedAssignments(state)) {
-    if (a.kind === 'assault') continue;               // away with the team
     const who = a.queued ? byOrder.get(a.id) : a.who;
     if (!who || out.has(who)) continue;
     const m = state.crew.members.find((x) => x.id === who);

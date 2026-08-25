@@ -212,7 +212,11 @@ opens a modal.
 | any other unique lieutenant | **65%** | 4 hands |
 | nobody, or a pirate off the island | **40%** | 4 hands |
 
-- March: **10 turns** out. The team is unavailable for the whole march.
+- March: **the walk**. The team gathers on open ground two tiles from the
+  spawner and goes in a turn later, so a mission is as long as the road you cut
+  and no longer has a fixed length. They are unavailable for the whole of it.
+- The **hive is last**: it is not a legal target until every other spawner has
+  fallen.
 - Success: the spawner dies. Its accumulating cohort is released and advances that
   turn. Its stars transfer to the survivor.
 - Failure: nobody dies; the team is disabled for **3 turns** (1 with a Hospital),

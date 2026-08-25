@@ -7,8 +7,9 @@ import { key, distance, neighbours, spiral } from './hex.js';
 import {
   tileAt, isBuildable, touchMap, addLog, nextId, holdFree, hasBuilding,
   buildingsOfType, towerManning, officerById, officerFor, shipNetwork,
-  walkableForWork,
+  walkableForWork, devFlag, isCrewGround, isPassable,
 } from './state.js';
+import { chargeable } from './enemy.js';
 
 const ok = { ok: true };
 const no = (why) => ({ ok: false, why });
@@ -372,7 +373,117 @@ export function towerFootprint(state, q, r, towerIndex) {
   return plan.some((p) => !p.ok) ? null : plan.map((p) => ({ q: p.q, r: p.r }));
 }
 
+/**
+ * Would putting a structure on these tiles shut the last way in?
+ *
+ * The swarm has to be able to reach the hull. A gun or a yard is ground they
+ * will not cross, so a line of them across the neck of your open ground can
+ * seal the ship inside its own map — and a sealed ship is not safe, it is a
+ * ship the resolve cannot resolve against: every cohort walks up to the wall,
+ * finds no way through, and nothing happens at all.
+ *
+ * So the rule is the same one a road has: your ground has to stay joined. What
+ * is measured is the tiles of your network that can still charge the hull —
+ * `chargeable` — and a placement that takes the last of them away is refused.
+ * A placement that shuts *a* way in while leaving another is perfectly legal,
+ * which is what a Palisade is for.
+ */
+function sealsTheWay(state, tiles) {
+  const blocked = new Set(tiles.map((p) => key(p.q, p.r)));
+  const net = shipNetwork(state);
+  const before = chargeable(state);
+  // Nothing joined to the ship yet — the landing itself is the way in, and it
+  // cannot be built over anyway. Nothing to protect.
+  if (net.size <= (state.island?.footprint?.length ?? 1)) return false;
+  const seeds = (state.island?.footprint ?? [{ q: state.base.q, r: state.base.r }])
+    .map((p) => tileAt(state, p.q, p.r)).filter(Boolean);
+  const seen = new Set();
+  const queue = [];
+  for (const s of seeds) { seen.add(key(s.q, s.r)); queue.push(s); }
+  for (let head = 0; head < queue.length; head++) {
+    const cur = queue[head];
+    for (const n of neighbours(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (seen.has(k) || blocked.has(k)) continue;
+      const tile = tileAt(state, n.q, n.r);
+      if (!tile || !isCrewGround(state, tile) || !isPassable(state, tile, 'assault')) continue;
+      seen.add(k);
+      queue.push(tile);
+    }
+  }
+  // A way in is a tile of your ground that a cohort could *arrive* on — one on
+  // the edge of what you have opened, with ground outside it they can march
+  // over — and that they could then walk from to the hull.
+  //
+  // The edge is the half that is easy to get wrong. Counting every tile of the
+  // network that can reach the hull says a ship walled into its own cove still
+  // has a hundred ways in, because the tiles inside the wall are all joined to
+  // the hull; what matters is whether anything *outside* can get to one of
+  // them. So the boundary is the test: a tile with a neighbour that is not
+  // your ground and that a cohort could stand on.
+  //
+  // `skip` is what the placement takes away, and it is the whole of the
+  // difference between the two counts. Asking both of them to ignore the tiles
+  // being built on made the rule unfireable: by the time a wall is going up on
+  // the last way in, "before" has already had that way in taken out of it, so
+  // the count read 0 -> 0 and the placement was waved through. The way in the
+  // player is about to shut has to be counted while it is still open.
+  // Where the swarm can get to on its own: a march out of every living spawner
+  // over ground a cohort will cross, stopping at your open ground. A tile of
+  // yours that this flood touches is a tile they can arrive on.
+  //
+  // The flood is what makes the rule mean anything. "Has a passable neighbour"
+  // is a local question and answers yes for a tile whose neighbour is itself
+  // walled in on all sides — so a ship could be sealed one tile at a time with
+  // every step reading as legal.
+  const outside = (skip) => {
+    const reach = new Set();
+    const queue = [];
+    for (const sp of state.spawners) {
+      if (!sp.alive) continue;
+      for (const f of sp.footprint) {
+        const k = key(f.q, f.r);
+        if (reach.has(k)) continue;
+        reach.add(k);
+        queue.push(f);
+      }
+    }
+    const touches = new Set();
+    for (let head = 0; head < queue.length; head++) {
+      const cur = queue[head];
+      for (const n of neighbours(cur.q, cur.r)) {
+        const k = key(n.q, n.r);
+        if (reach.has(k)) continue;
+        const tile = tileAt(state, n.q, n.r);
+        if (!tile) continue;
+        if (skip && blocked.has(k)) continue;       // the structure they are about to meet
+        if (net.has(k)) { touches.add(k); continue; }  // your ground: they stop here
+        if (!isPassable(state, tile)) continue;     // and they march over the rest
+        reach.add(k);
+        queue.push(tile);
+      }
+    }
+    return touches;
+  };
+
+  // A way in is a tile of yours they can arrive on and then charge the hull from.
+  const ways = (charge, skip) => {
+    let n = 0;
+    for (const k of outside(skip)) {
+      if (skip && blocked.has(k)) continue;
+      if (!charge.has(k)) continue;
+      const [q, r] = k.split(',').map(Number);
+      const tile = tileAt(state, q, r);
+      if (!tile || tile.occupant?.kind === 'base') continue;
+      n++;
+    }
+    return n;
+  };
+  return ways(before, false) > 0 && ways(seen, true) === 0;
+}
+
 export function canBuildTower(state, q, r, towerIndex, tier) {
+  if (C.towerShelved(towerIndex) && !devFlag(state, 'allContent')) return no(C.SHELVED_WHY);
   const t = tileAt(state, q, r);
   if (!t) return no('off the map');
   if (t.occupant) return no('occupied');
@@ -409,6 +520,7 @@ export function canBuildTower(state, q, r, towerIndex, tier) {
   if (!reachable) {
     return no('no way to walk to it — open the ground beside it first');
   }
+  if (sealsTheWay(state, plan)) return no('it would shut the last way in — the swarm has to be able to reach you');
   // The emplacement is wood and stone; the gun is a fitting out of the hold, of
   // this tower's own kind. Which tier goes in decides what the tower is built
   // at — but no longer how much ground it wants. `tier` names one; without it
@@ -573,6 +685,7 @@ export function evolveTower(state, tower, partner) {
 export function canBuildBuilding(state, type, q, r) {
   const def = C.buildingDef(type);
   if (!def) return no('no such building');
+  if (def.shelved && !devFlag(state, 'allContent')) return no(C.SHELVED_WHY);
   if (!def.repeatable) {
     if (buildingsOfType(state, type).length > 0) return no('already built');
     if (queuedPlots(state).some((p) => p.type === type)) return no('already in the queue');
@@ -608,6 +721,9 @@ export function canBuildBuilding(state, type, q, r) {
     });
     if (!onCache) return no('must cover an unworked treasure cache');
   }
+  // A yard is ground the swarm will not cross, exactly like a gun, so a yard
+  // across the neck of your ground shuts the way in just as thoroughly.
+  if (sealsTheWay(state, foot)) return no('it would shut the last way in — the swarm has to be able to reach you');
   return ok;
 }
 

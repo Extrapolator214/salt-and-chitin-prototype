@@ -3,7 +3,7 @@
 import C from './config.js';
 import { key, distance, neighbours, line, axialRound } from './hex.js';
 import {
-  tileAt, isTargetable, hasSight, addLog, towerPower, towerRange,
+  tileAt, isTargetable, hasSight, addLog, towerPower, towerRange, draw,
 } from './state.js';
 import { openPath, findPath, advanceCost } from './enemy.js';
 import { damageBuilding } from './build.js';
@@ -24,7 +24,11 @@ function makeUnit(state, spec, index) {
     speed: def.speed * (spec.elite ? C.ELITE_SPEED_MULT : 1),
     hullDamage: spec.elite ? C.ELITE_HULL_DAMAGE : def.hullDamage,
     shieldHp: spec.role === 'shield' ? C.SHIELD_HP : 0,
-    pos: -index * 0.45,
+    // Three to a rank, the ranks close behind one another, and a random slack
+    // on each so the wave has a shape rather than a formation. Always behind
+    // the entry, never in front of it — a unit that started at pos > 0 would
+    // begin the resolve already inside your lines.
+    pos: -(Math.floor(index / C.CONTACT_ABREAST) * C.CONTACT_RANK_GAP + draw(state) * C.CONTACT_JITTER),
     alive: true,
     held: false,
     tile: null,
@@ -112,10 +116,22 @@ export function beginCombat(state, contacts, events) {
       path = findPath(state, entry, state.base, 'assault');
       overland = true;
     }
-    if (!path) path = [{ q: entry.q, r: entry.r }];
+    // And if there is no way in at all, there is no way in: the cohort has not
+    // reached anything, so nothing is resolved and nothing is damaged.
+    //
+    // This is the wall working. The assault phase refuses ground the march
+    // allows — a tile with a gun or a yard on it, and scrub — so open ground can
+    // join the ship on the map and join nothing at all in the resolve. A cohort
+    // used to be handed a path one tile long there, which is a path already at
+    // its end: every unit arrived on the hull the instant the resolve opened,
+    // out of range of every gun. `cohortTarget` now steers them to an entry
+    // they can actually charge from, so reaching this line means every way in
+    // is shut — and a swarm with no way in does not get one for free.
+    if (!path || path.length < 2) continue;
     const units = cohort.units.map((u) => makeUnit(state, u, idx++));
     groups.push({ entry, path, units, overland, spawnerId: cohort.spawnerId });
   }
+  if (!groups.length) return null;
   const all = groups.flatMap((g) => g.units);
   state.combat = {
     groups,

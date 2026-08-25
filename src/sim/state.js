@@ -6,6 +6,16 @@ import { generateIsland } from './generate.js';
 import { key, parseKey, distance, neighbours, spiral } from './hex.js';
 import { createRng, next } from './rng.js';
 
+/**
+ * Dev flags every new run starts with.
+ *
+ * Empty in the game — a run begins honest. It is here for the harnesses: the
+ * acceptance and view suites pin rules belonging to content this build shelves
+ * (`allContent`), and a module namespace cannot be monkey-patched, so the door
+ * they need is one they can write into rather than one they can replace.
+ */
+export const devDefaults = {};
+
 export function createState(seed) {
   const island = generateIsland(seed);
   const state = {
@@ -31,7 +41,7 @@ export function createState(seed) {
 
     // The dev menu's cheats. Part of the run, so they are saved with it — see
     // `DEV_FLAGS`.
-    dev: { instantTravel: false, walkAnywhere: false },
+    dev: { instantTravel: false, walkAnywhere: false, ...devDefaults },
 
     crew: {
       cap: C.HANDS_CAP,
@@ -262,7 +272,7 @@ export function isTargetable(state, tile) {
  * fixture beside a live run, two runs side by side — reach the same version
  * numbers and were handed each other's answers.
  */
-const cacheFor = (state, name) => {
+export const cacheFor = (state, name) => {
   if (!state.derived) state.derived = {};
   return (state.derived[name] = state.derived[name] || { version: -1, value: null });
 };
@@ -358,6 +368,12 @@ export function isCrewGround(state, tile) {
 export const DEV_FLAGS = {
   instantTravel: 'no distance limit for units',
   walkAnywhere: 'units walk through unopened ground',
+  // The shelf, put back. Six yards and six of the eight gun kinds are switched
+  // off in this build so that a balance pass has a small number of moving parts
+  // (see `shelved` in the tables); this turns the whole shelf back on. It is a
+  // dev flag rather than a setting because a run played with it on is not the
+  // run the numbers are tuned against.
+  allContent: 'every shelved yard and gun is buildable again',
 };
 
 export const devFlag = (state, name) => !!(state && state.dev && state.dev[name]);

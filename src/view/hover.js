@@ -1,6 +1,7 @@
 // The tile info panel. Never blocks, never needs a click.
 
 import C from '../sim/config.js';
+import { assaultStagingAt, assaultTeam, plannedStagingAt } from '../sim/assault.js';
 import { distance } from '../sim/hex.js';
 import {
   tileAt, terrainDef, towerRange, towerPower, towerManning, isBuildingManned,
@@ -63,6 +64,21 @@ export function renderHover(state, el, hover) {
   s += pair('feature', t.feature ? `${featureName(t.feature)}${t.featureWorked ? ' (worked)' : ''}` : '—');
   if (t.feature && !t.featureWorked && C.featureAction(t.feature)) {
     s += row(C.featureAction(t.feature), isClearable(state, t) ? 'once the tile is cleared' : 'ready — send a hand');
+  }
+  const planned = plannedStagingAt(state, t.q, t.r);
+  if (planned) {
+    s += row('sabotage', `the assault party gathers here — ordered, this turn`);
+  }
+  const mission = assaultStagingAt(state, t.q, t.r);
+  if (mission) {
+    const team = assaultTeam(state, mission);
+    const here = team.filter((who) => {
+      const m = state.crew.members.find((x) => x.id === who);
+      return m && m.q === t.q && m.r === t.r;
+    }).length;
+    s += row('sabotage', mission.state === 'gather'
+      ? `assault party is gathering — ${here} of ${team.length} here`
+      : 'the charges are going in');
   }
   s += pair('occupant', t.occupant ? t.occupant.kind : '—');
   const standing = membersAt(state, t.q, t.r);

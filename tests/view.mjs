@@ -13,9 +13,18 @@ import * as H from '../src/sim/hex.js';
 import * as St from '../src/sim/state.js';
 import * as O from '../src/sim/orders.js';
 import * as B from '../src/sim/build.js';
+import * as A from '../src/sim/assault.js';
 import { resolveTurn, concludeTurn } from '../src/sim/turn.js';
 import { skip, finishCombat, beginCombat, tick } from '../src/sim/combat.js';
 import { putCrewOnFrontier, driveRoadGang, workFeatures } from './route.mjs';
+
+// Every fixture in this file plays with the whole shelf available. Six yards
+// and six of the eight gun kinds are switched off in the shipped build so that
+// a balance pass has a small number of moving parts (`shelved` in the tables,
+// `allContent` in the dev flags) — but the rules they are made of are still
+// rules, and this suite is what pins them. The shelving itself is checked in
+// its own section, against a state that does not set the flag.
+St.devDefaults.allContent = true;
 
 let pass = 0, fail = 0;
 const t = (name, cond, detail = '') => {
@@ -60,6 +69,7 @@ const { renderHud } = await import('../src/view/hud.js');
 const { renderHover } = await import('../src/view/hover.js');
 const camera = await import('../src/view/camera.js');
 const reel = await import('../src/view/reel.js');
+const modals = await import('../src/view/modals.js');
 const labour = await import('../src/sim/labour.js');
 
 console.log('\nview · it loads and it draws');
@@ -116,7 +126,15 @@ const fighting = St.createState(20260816);
     ],
   };
   beginCombat(fighting, [{ cohort, entry: lane[lane.length - 1] }], []);
-  for (let i = 0; i < 120; i++) tick(fighting, 1 / 30);
+  // Run it until there is something in the air, and stop there. It used to be a
+  // flat four seconds, which was long enough to see a shot fired and short
+  // enough to catch one still flying — neither is true now that a grub crosses
+  // the island at a third of the pace, on an island a third of the width. Ticked
+  // to a condition, the fixture stops caring how fast either of those is.
+  for (let i = 0; i < 1800; i++) {
+    tick(fighting, 1 / 30);
+    if (fighting.combat.projectiles.length + fighting.combat.impacts.length > 0) break;
+  }
 }
 t('the fixture stands a manned gun beside the lane',
   fighting.towers.length === 1 && St.towerPower(fighting, fighting.towers[0]) > 0,
@@ -125,6 +143,293 @@ t('a resolve puts rounds in the air',
   fighting.combat.projectiles.length + fighting.combat.impacts.length > 0,
   `${fighting.combat.projectiles.length} in flight, ${fighting.combat.impacts.length} landing, `
   + `${fighting.combat.killed} killed`);
+
+// ---- the guide -------------------------------------------------------------
+//
+// Eight pages of prose that quote three dozen constants between them. Nothing
+// else in the build reads `C` this widely, and a page that throws is a page
+// nobody sees until a player opens the tab — so every one of them is rendered
+// here, against a real state.
+{
+  const s = St.createState(20260816);
+  const ui = { refresh: () => {} };
+  const el = {
+    innerHTML: '',
+    contains: () => false,
+    querySelectorAll: () => [],
+    querySelector: () => null,
+  };
+  const tabs = ['run', 'clearing', 'crew', 'buildings', 'towers', 'gold', 'enemy', 'sabotage'];
+  let drawn = 0, thrown = null;
+  for (const tab of [undefined, ...tabs]) {
+    try {
+      modals.open('guide', tab ? { tab } : {}, ui);
+      modals.renderModal(s, el, {}, ui);
+      if (el.innerHTML.includes('class="pane"')) drawn++;
+    } catch (err) { thrown = `${tab}: ${err.message}`; break; }
+  }
+  modals.close(ui);
+  t('every page of the guide renders', drawn === tabs.length + 1 && !thrown,
+    thrown || `${drawn} pages drawn`);
+
+  // The tab strip is the navigation, so a page nobody can reach is a page that
+  // is not there. Checked against the list above rather than against itself.
+  modals.open('guide', {}, ui);
+  modals.renderModal(s, el, {}, ui);
+  // `esc` writes the quotes as entities, which is what the browser parses back
+  const offered = [...el.innerHTML.matchAll(/tab&quot;:&quot;([a-z]+)&quot;/g)].map((m) => m[1]);
+  modals.close(ui);
+  t('and every one of them has a tab to reach it by',
+    tabs.every((x) => offered.includes(x)) && offered.length === tabs.length,
+    offered.join(' '));
+}
+
+const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// ---- the mission's own box --------------------------------------------------
+//
+// The one moment in a run the player brought about on purpose. It has a picture
+// because it deserves one, and it is held in front of the contact rather than
+// shown after it — a spawner that came off the map during the walk, with the
+// news arriving after the fight, was not news.
+{
+  const s = St.createState(20260816);
+  const ui = { refresh: () => {} };
+  const el = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+  const both = [
+    { kind: 'assault', result: 'success', target: 'shell spawner', leader: 'Sapper Captain', chance: 0.9 },
+    { kind: 'assault', result: 'failure', target: 'hive', leader: null, chance: 0.4, downtime: 3 },
+  ];
+  let drawn = 0, art = 0, onward = 0;
+  for (const event of both) {
+    modals.open('assaultResult', { event, more: true }, ui);
+    modals.renderModal(s, el, {}, ui);
+    if (/Bug Sabotage mission/.test(el.innerHTML)) drawn++;
+    if (/class="art"/.test(el.innerHTML)) art++;
+    if (/afterAssault/.test(el.innerHTML)) onward++;
+  }
+  modals.close(ui);
+  t('the mission box draws both endings, each with its own picture and a way on',
+    drawn === 2 && art === 2 && onward === 2, `${drawn} drawn, ${art} with art, ${onward} with a button`);
+
+  // ...and the map holds the spawner it killed until that box opens
+  const held = St.createState(20260816);
+  const dead = held.spawners[0];
+  dead.alive = false;
+  const frame = (holdSpawners) => {
+    const { canvas, calls } = stubCanvas(900, 600);
+    const cam = camera.createCamera();
+    cam.zoom = camera.ZOOMS.length - 1;
+    camera.centreOn(cam, canvas, dead.q, dead.r);
+    const was = calls();
+    render(held, cam, canvas, { holdSpawners });
+    return calls() - was;
+  };
+  const without = frame(null);
+  const holding = frame(new Set([dead.id]));
+  t('a spawner killed this turn is still drawn while its box is pending',
+    holding > without, `${without} draw calls without the hold, ${holding} with it`);
+}
+
+// ---- the shelf reads live-first ---------------------------------------------
+//
+// Six yards and six guns are switched off in this build. They stay on the list,
+// because a shelf the player remembers and cannot find reads as a bug — but a
+// row nobody can act on is a row to step over, and interleaved they turned both
+// lists into a search.
+{
+  const s = St.createState(20260816);
+  const ui = { refresh: () => {} };
+  const el = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+  const orderOf = (name, defs) => {
+    modals.open(name, { q: s.base.q, r: s.base.r }, ui);
+    modals.renderModal(s, el, {}, ui);
+    modals.close(ui);
+    return defs
+      .map((d) => ({ shelved: !!d.shelved, at: el.innerHTML.indexOf(`>${d.name}`) }))
+      .filter((x) => x.at >= 0)
+      .sort((a, b) => a.at - b.at)
+      .map((x) => x.shelved);
+  };
+  const lastLive = (flags) => flags.lastIndexOf(false);
+  const firstShelved = (flags) => flags.indexOf(true);
+  const guns = orderOf('towers', C.TOWERS);
+  const yards = orderOf('economy', C.BUILDINGS.filter((b) => b.type !== 'wall'));
+  t('every gun that can be built is listed before every gun that cannot',
+    guns.length === C.TOWERS.length && firstShelved(guns) > lastLive(guns),
+    guns.map((x) => (x ? '-' : 'o')).join(''));
+  t('and the same for the yards',
+    yards.length === C.BUILDINGS.length - 1 && firstShelved(yards) > lastLive(yards),
+    yards.map((x) => (x ? '-' : 'o')).join(''));
+}
+
+// ---- a sabotage mission on the map ------------------------------------------
+//
+// The mission is four bodies walking to a tile nobody chose, so all three of the
+// places it shows up have to agree about it: the map rings the staging ground
+// and joins the team to it, the tile panel says what is happening there, and the
+// tile's own box offers the one decision left — calling it off.
+{
+  const s = St.createState(20260816);
+  St.landHands(s, 10);
+  s.res.wood = 1e6; s.res.stone = 1e6;
+  const sp = s.spawners.find((x) => x.kind !== 'hive');
+  for (const p of H.line(s.base, sp)) {
+    const tile = St.tileAt(s, p.q, p.r);
+    if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+    tile.terrain = 'road'; tile.cleared = true;
+  }
+  for (const h of H.spiral(s.base, 6)) {
+    const tile = St.tileAt(s, h.q, h.r);
+    if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+    tile.terrain = 'road'; tile.cleared = true;
+  }
+  St.touchMap(s);
+  const spot = H.spiral(s.base, 8).find((h) => B.canBuildBuilding(s, 'sappers', h.q, h.r).ok);
+  const camp = spot && B.buildBuilding(s, 'sappers', spot.q, spot.r);
+  if (camp) camp.complete = true;
+  const mission = camp && A.schedule(s, sp.id, null);
+
+  t('a mission stages on a tile two out from the spawner, with a team walking to it',
+    !!mission && !!mission.staging && A.assaultTeam(s, mission).length === mission.hands
+    && H.distance(mission.staging, sp) >= C.STAGING_DISTANCE,
+    mission ? `staging (${mission.staging.q},${mission.staging.r}), ${A.assaultTeam(s, mission).length} on the way`
+      : 'no camp spot on this seed');
+
+  // ...and before it is away at all. An order sits in the queue until the turn
+  // ends, and the staging ground was invisible for exactly as long as sending
+  // the team was still a decision.
+  {
+    const q = St.createState(20260816);
+    St.landHands(q, 10);
+    q.res.wood = 1e6; q.res.stone = 1e6;
+    const flank = q.spawners.find((x) => x.kind !== 'hive');
+    for (const p of H.line(q.base, flank)) {
+      const tile = St.tileAt(q, p.q, p.r);
+      if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+      tile.terrain = 'road'; tile.cleared = true;
+    }
+    for (const h2 of H.spiral(q.base, 6)) {
+      const tile = St.tileAt(q, h2.q, h2.r);
+      if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+      tile.terrain = 'road'; tile.cleared = true;
+    }
+    St.touchMap(q);
+    const at = H.spiral(q.base, 8).find((h2) => B.canBuildBuilding(q, 'sappers', h2.q, h2.r).ok);
+    const yard = at && B.buildBuilding(q, 'sappers', at.q, at.r);
+    if (yard) {
+      yard.complete = true;
+      // ...and manned, which is what the order asks of it. The fixture above
+      // calls `A.schedule` directly and never has to satisfy the check.
+      for (let i = 0; i < St.handsNeededFor(q, yard); i++) {
+        q.crew.assignments.push({
+          id: `man-mission-${i}`, who: q.crew.members[i].id, kind: 'man',
+          target: yard.id, from: { q: q.base.q, r: q.base.r }, leftOn: 0, arrivesOnTurn: 0,
+        });
+      }
+    }
+    // bodies spread about, so the walks are of different lengths
+    q.crew.members.filter((m) => m.kind === 'hand').slice(3, 8)
+      .forEach((m, i) => { m.q = q.base.q + i * 2; m.r = q.base.r - i * 2; });
+    const put = O.enqueue(q, { type: 'scheduleAssault', spawnerId: flank.id, leader: null });
+    const staging = A.stagingTile(q, flank);
+    const plan = A.plannedStagingAt(q, staging.q, staging.r);
+    const panel2 = { textContent: '' };
+    renderHover(q, panel2, staging);
+    t('a mission still in the queue already shows the ground it will gather on',
+      put.ok && !!plan && /gathers here/.test(panel2.textContent),
+      put.ok ? (plan ? panel2.textContent.split('\n').find((l) => /sabotage/.test(l)) : 'no planned staging')
+        : put.why);
+
+    // ...and who is walking to it, joined to it the way a queued clear joins a
+    // worker to his face — one line per body, from wherever that body stands
+    const lines = jobLines(q);
+    const drawnToStaging = [...lines.values()]
+      .filter((to) => to.q === staging.q && to.r === staging.r).length;
+    const want = A.assaultHands(q, null);
+    t('and every body that will walk to it is joined to it',
+      drawnToStaging === want, `${drawnToStaging} lines for a team of ${want}`);
+
+    // the tile's box names them, and says how long each is on the road: some
+    // are beside it and some are turns away, which is the decision
+    const ui2 = { refresh: () => {} };
+    const el2 = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+    modals.open('clearTile', { q: staging.q, r: staging.r }, ui2);
+    modals.renderModal(q, el2, {}, ui2);
+    modals.close(ui2);
+    const said = el2.innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    // One line per body, each with its own walk. Whether two of them differ is
+    // geography — what is pinned is that the panel answers it per body rather
+    // than once for the team.
+    const arrivals = (said.match(/(arrives in \d+ turns|arrives next turn|already here)/g) || []);
+    t('and the tile says who is going and when each of them gets there',
+      /setting out/.test(said) && arrivals.length === want,
+      `${arrivals.length} of ${want}: ${arrivals.join(', ') || said.slice(0, 60)}`);
+  }
+
+  // the map draws it without throwing, at both zooms
+  let drew = 0;
+  for (const zoom of [0, camera.ZOOMS.length - 1]) {
+    const { canvas } = stubCanvas(900, 600);
+    const cam = camera.createCamera();
+    cam.zoom = zoom;
+    camera.centreOn(cam, canvas, s.base.q, s.base.r);
+    render(s, cam, canvas, {});
+    drew++;
+  }
+  t('and the map draws the mission at both zooms', drew === 2, `${drew} frames`);
+
+  // the panel names it
+  const panel = { textContent: '' };
+  renderHover(s, panel, { q: mission.staging.q, r: mission.staging.r });
+  t('the tile panel says the assault party is gathering',
+    /assault party is gathering/.test(panel.textContent),
+    panel.textContent.split('\n').find((l) => /sabotage/.test(l)) || '(no line)');
+
+  // and the tile's box offers the cancel
+  const ui = { refresh: () => {} };
+  const el = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+  modals.open('clearTile', { q: mission.staging.q, r: mission.staging.r }, ui);
+  modals.renderModal(s, el, {}, ui);
+  modals.close(ui);
+  const text = el.innerHTML.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  t('the tile it stages on offers the mission and a way to call it off',
+    /assault party is gathering/i.test(text) && /cancelAssault/.test(el.innerHTML)
+    && new RegExp(esc(sp.name)).test(text),
+    text.trim().slice(0, 90));
+
+  // ...and the team is named once, not twice: the generic "already spoken for"
+  // list would otherwise offer a Stand down per body, and pulling one body out
+  // leaves a team that can never all be present and a mission that never ends.
+  t('the team is not also offered one at a time',
+    !/Stand down/.test(el.innerHTML), (el.innerHTML.match(/Stand down/g) || []).length + ' stand-down buttons');
+
+  // standing one of them down anyway — from the crew panel, say — calls the
+  // whole mission off rather than breaking it
+  {
+    const one = s.crew.assignments.find((a) => a.kind === 'assault');
+    const said = O.standDown(s, one.id);
+    t('standing a single member down calls the mission off instead of breaking it',
+      said.ok && s.assaults.length === 0
+      && s.crew.assignments.filter((a) => a.kind === 'assault').length === 0,
+      `${s.assaults.length} missions, ${s.crew.assignments.filter((a) => a.kind === 'assault').length} on teams`);
+    A.schedule(s, sp.id, null);   // put it back for the cancel test below
+  }
+
+  // calling it off hands the bodies back
+  const before = s.crew.assignments.filter((a) => a.kind === 'assault').length;
+  const said = A.cancel(s, s.assaults[0].id);
+  t('calling it off frees the team and drops the mission',
+    said.ok && s.assaults.length === 0 && before > 0
+    && s.crew.assignments.filter((a) => a.kind === 'assault').length === 0,
+    `${before} on the team before, ${s.assaults.length} missions after`);
+
+  // ...but only while they are still walking
+  const again = camp && A.schedule(s, sp.id, null);
+  if (again) again.state = 'strike';
+  t('and not once the charges are going in',
+    !!again && !A.cancel(s, again.id).ok, again ? A.cancel(s, again.id).why : 'not scheduled');
+}
 
 /** Everything on the island, nudged half a hex off its own tile. */
 const midStride = (s) => ({
@@ -206,7 +511,10 @@ t(`the map draws in every mode without throwing`, !threw,
 {
   const s = St.createState(20260816);
   s.res.wood = 1e6; s.res.stone = 1e6;
-  for (const h of H.spiral(s.base, C.LANDING_CLIFF_RADIUS - 1)) {
+  // A blob big enough to stand a 4-tile yard in with a tile to spare. It used
+  // to be cut to the cliff ring's radius, which was 8 and is 3 now that the
+  // island is a third of the width — and three tiles of road hold no Forge.
+  for (const h of H.spiral(s.base, 6)) {
     const tt = St.tileAt(s, h.q, h.r);
     if (tt && !tt.occupant && C.TERRAIN[tt.terrain].clearable) { tt.terrain = 'road'; tt.cleared = true; }
   }
@@ -358,6 +666,12 @@ t(`the map draws in every mode without throwing`, !threw,
     O.enqueue(s3, { type: 'workFeature', who: 'hand', target: { q: site.q, r: site.r } });
     const ev = resolveTurn(s3);                         // the order becomes an assignment
     concludeTurn(s3, ev);
+    // ...and one more, because the walk out to a wreck is two turns now: the
+    // case under test is a body whose arrival turn has come round while he is
+    // still visibly short of the job, not a body who has not set out.
+    while (s3.crew.assignments.some((x) => x.kind === 'feature' && x.arrivesOnTurn > s3.turn)) {
+      concludeTurn(s3, resolveTurn(s3));
+    }
 
     const a = s3.crew.assignments.find((x) => x.kind === 'feature');
     const body = St.memberById(s3, a.who);
@@ -383,7 +697,18 @@ t(`the map draws in every mode without throwing`, !threw,
 // after the walking at step 1b, so a one-turn scrub tile is road and a forest
 // tile is a third worked before anyone has watched a body reach either.
 {
-  const s = St.createState(20260816);
+  // The two cases below want one tile cut this turn and another part-worked, so
+  // the fixture needs a landing frontier with scrub on it (one turn) and forest
+  // (three) — and a crew big enough to take both. A run starts with three hands
+  // on a 12-tile island, so both of those are arranged rather than assumed: a
+  // boat's worth of hands, and whichever of the first seeds offers the mix.
+  let s = null;
+  for (let i = 0; i < 12 && !s; i++) {
+    const try_ = St.createState(C.DEFAULT_SEED + i);
+    St.landHands(try_, 12);
+    const faces = O.workableTiles(try_);
+    if (faces.some((x) => x.terrain === 'scrub') && faces.some((x) => x.terrain === 'forest')) s = try_;
+  }
   putCrewOnFrontier(s);                                 // queue a frontier of clears
   const before = reel.snapshotMovers(s);
   const wasScrub = [...s.map.tiles.values()]
