@@ -568,6 +568,11 @@ export function buildTower(state, q, r, towerIndex, want) {
 /** Fit an item of `tier` in place; the displaced item returns to inventory. */
 export function canFitItem(state, tower, tier) {
   if (tower.evolved) return no('evolved towers take no items');
+  // Not while the yard is already working one in. The merge finishes by setting
+  // the tier to what it was raising toward, so a better fitting dropped in
+  // behind it is a gun that quietly steps back down a few turns later — and
+  // there is no honest answer to which of the two fittings the player meant.
+  if (tower.merging) return no(`already rising to tier ${tower.merging.toTier}`);
   if (tier <= tower.tier && tower.itemTier > 0) return no('not a higher tier');
   if (tier < 1 || tier > C.MAX_TIER) return no('no such tier');
   if (!countOf(state, tower.towerIndex, tier)) return no(`no tier-${tier} ${C.itemName(tower.towerIndex)} in the hold`);

@@ -20,9 +20,9 @@ const C = {
   // shore, so a cohort crosses about 2 x ISLAND_RADIUS tiles to reach the ship —
   // at ~2.5 tiles a turn that is the ~17-27 turn approach the design runs on.
   // Raising it makes a bigger island and a proportionally longer approach.
-  ISLAND_RADIUS: 12,
+  ISLAND_RADIUS: 13,
   OCEAN_MARGIN: 4,
-  MAP_RADIUS: 19, // ISLAND_RADIUS + OCEAN_MARGIN + the coast's outward swing
+  MAP_RADIUS: 20, // ISLAND_RADIUS + OCEAN_MARGIN + the coast's outward swing
   COAST_LOBES: 1.5,  // smooth bays and headlands
   COAST_JAG: 0.8,    // per-tile raggedness on top
   LANDING_BEARING: 90, // +y is south on screen; the ship lands on the south beach
@@ -67,11 +67,12 @@ const C = {
   // implies, `C.enemySpeed`, so tar reads 0.20x: five times slower.
   TERRAIN: {
     forest: { clearable: true, yield: { wood: 14 }, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: false },
-    // Old timber: a tenth more wood than forest for the same three turns. The
-    // margin is deliberately thin — felling a canopy stand is worth doing for
-    // the shadow it lifts off everything behind it, and the extra wood is a
-    // sweetener rather than the reason.
-    canopy: { clearable: true, yield: { wood: 15 }, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: true },
+    // Old timber: a tenth more wood than forest, for four turns of work against
+    // forest's three. It is the one ground that pays *worse* by the turn than
+    // the ground beside it, and it is meant to — felling a canopy stand is
+    // worth doing for the shadow it lifts off everything behind it, and the
+    // extra wood is a consolation rather than the reason.
+    canopy: { clearable: true, yield: { wood: 15 }, turns: 4, buildable: true, passable: true, assaultPassable: true, advance: 3.0, targetableVirgin: false, blocksSight: true },
     // Scrub is thin enough to march through on the way in, but a swarm at full
     // tilt will not push into it — the charge keeps to open ground.
     //
@@ -216,7 +217,7 @@ const C = {
   CLEARED_BECOMES: 'road',
 
   // 4 · Labour
-  HANDS_START: 3,
+  HANDS_START: 2,
   HANDS_CAP: 40,
   TILES_PER_HAND_PER_TURN: 1,
   // Cutting a tile is three turns of one worker's labour, and the tile pays
@@ -274,7 +275,7 @@ const C = {
   // built around: the crew could never grow. It matters now that it could not,
   // because the gun line act 3 demands is nine hands of the ten you land with.
   FLARE_COST_IRON: 30,
-  FLARE_HANDS: 3,
+  FLARE_HANDS: 2,
   FLARE_DELAY_TURNS: 2,
   FLARE_DELAY_POWDER: 1,
   FLARE_POWDER_DISCOUNT: 0.25,
@@ -347,7 +348,7 @@ const C = {
     { i: 1, shelved: true, name: 'Culverin Battery', shelf: 'gunnery', range: 4, shape: 'single', tiles: 2, rate: 'slow', essence: 'Bore', fire: 'slow single target', colour: '#b9743f', item: 'Culverin', itemShort: 'Culverin', source: 'iron' },
     { i: 2, shelved: true, name: 'Chain-Shot Gallery', shelf: 'gunnery', range: 3, shape: 'file', tiles: 2, rate: 'normal', essence: 'Rake', fire: 'pierces a file along the road', colour: '#a85c5c', item: 'Chain-Shot', itemShort: 'Chain-Shot', source: 'iron' },
     { i: 3, shelved: true, name: 'Dynamite Throwers', shelf: 'gunnery', range: 3, shape: 'blast', tiles: 2, rate: 'slow', essence: 'Blast', fire: 'slow blast, radius 1', colour: '#d0603a', item: 'Powder Charge', itemShort: 'Charge', source: 'gold' },
-    { i: 4, name: 'Parrot Swarm Aviary', shelf: 'beasts', range: 3, shape: 'multi', tiles: 3, rate: 'fast', essence: 'Swarm', fire: 'many weak hits, up to 4 targets', colour: '#4fae7a', item: 'Parrot Cage', itemShort: 'Parrots', source: 'gold' },
+    { i: 4, name: 'Parrot Swarm Aviary', shelf: 'beasts', range: 3, shape: 'multi', tiles: 2, rate: 'fast', essence: 'Swarm', fire: 'many weak hits, up to 4 targets', colour: '#4fae7a', item: 'Parrot Cage', itemShort: 'Parrots', source: 'gold' },
     { i: 5, shelved: true, name: 'Alligator Guards', shelf: 'beasts', range: 1, shape: 'single', tiles: 2, rate: 'normal', essence: 'Snag', fire: 'holds what it hits in place', colour: '#5e8a3a', item: 'Alligator Egg', itemShort: 'Gator Egg', source: 'gold' },
     { i: 6, shelved: true, name: 'Krakenling Well', shelf: 'beasts', range: 1, shape: 'adjacent', tiles: 1, rate: 'normal', essence: 'Sweep', fire: 'hits every adjacent road tile', colour: '#5a7fae', item: 'Krakenling Spawn', itemShort: 'Krakenling', source: 'gold' },
     { i: 7, shelved: true, name: 'Monkey Riggers', shelf: 'beasts', range: 2, shape: 'single', tiles: 1, rate: 'normal', essence: 'Plunder', fire: 'yields 2 gold per kill', colour: '#b58b4a', item: 'Monkey Troop', itemShort: 'Monkeys', source: 'gold' },
@@ -426,9 +427,9 @@ const C = {
   // three times their own tile count in ground, and the cove holds well under
   // that.
   BUILDINGS: [
-    { type: 'warehouse', name: 'Warehouse', tiles: 5, cost: { wood: 150, stone: 100 }, owns: 'inventory', effect: 'the hold becomes unlimited', repeatable: false },
+    { type: 'warehouse', name: 'Warehouse', tiles: 3, cost: { wood: 150, stone: 100 }, owns: 'inventory', effect: 'the hold becomes unlimited', repeatable: false },
     { type: 'forge', shelved: true, name: 'Forge', tiles: 4, cost: { wood: 110, stone: 70 }, owns: 'iron', effect: '3 stone -> 1 iron per turn', repeatable: false },
-    { type: 'workshop', name: 'Workshop', tiles: 5, cost: { wood: 150, stone: 100 }, owns: 'ironwork', effect: 'iron fittings craftable at 6 iron', repeatable: false },
+    { type: 'workshop', name: 'Workshop', tiles: 3, cost: { wood: 150, stone: 100 }, owns: 'ironwork', effect: 'iron fittings craftable at 6 iron', repeatable: false },
     { type: 'dock', shelved: true, name: 'Trading Dock', tiles: 5, cost: { wood: 140, stone: 90 }, owns: 'the surplus', effect: '12 wood or stone -> 1 gold per turn, and a counter to trade over', repeatable: false },
     // The other half of the hold. Five of the eight fittings are things no crew
     // makes — powder, birds, eggs, spawn, monkeys — and this is the only door
@@ -436,11 +437,11 @@ const C = {
     // on a single hand: it gates every gun of its shelf, and a gate that costs
     // a fifth of the company to open is a gate nobody opens in time. The
     // merchant keeps his own counter; the hand is there to carry.
-    { type: 'merchant', name: 'Peculiar Merchant', tiles: 3, crew: 1, cost: { wood: 90, stone: 60 }, owns: 'oddities', effect: 'gold fittings can be bought at 8 gold; runs on one hand', repeatable: false },
+    { type: 'merchant', name: 'Peculiar Merchant', tiles: 2, crew: 1, cost: { wood: 90, stone: 60 }, owns: 'oddities', effect: 'gold fittings can be bought at 8 gold; runs on one hand', repeatable: false },
     { type: 'tinker', shelved: true, name: "Tinker's Shed", tiles: 4, cost: { wood: 130, stone: 90 }, owns: 'evolution', effect: 'evolutions become possible', repeatable: false },
-    { type: 'sappers', name: "Sappers' Camp", tiles: 6, cost: { wood: 380, stone: 260 }, owns: 'offence', effect: 'sabotage teams can be raised', repeatable: false },
+    { type: 'sappers', name: "Sappers' Camp", tiles: 3, cost: { wood: 380, stone: 260 }, owns: 'offence', effect: 'sabotage teams can be raised', repeatable: false },
     { type: 'hospital', shelved: true, name: 'Hospital', tiles: 3, cost: { wood: 90, stone: 60 }, owns: 'downtime', effect: 'sabotage downtime 3 -> 1 turn', repeatable: false },
-    { type: 'powder', name: 'Powder Store', tiles: 3, cost: { wood: 75, stone: 53 }, owns: 'the flare', effect: 'flare cost -25%, lands in 1 turn', repeatable: false },
+    { type: 'powder', name: 'Powder Store', tiles: 2, cost: { wood: 75, stone: 53 }, owns: 'the flare', effect: 'flare cost -25%, lands in 1 turn', repeatable: false },
     { type: 'excavation', shelved: true, name: 'Excavation Camp', tiles: 4, cost: { wood: 100, stone: 60 }, owns: 'buried gold', effect: 'works one cache: 220 gold over 10 turns', repeatable: true },
     { type: 'bunkhouse', shelved: true, name: 'Bunkhouse', tiles: 3, cost: { wood: 50, stone: 40 }, owns: 'manning', effect: 'buildings within radius 3 cost 1 hand', repeatable: true },
     // Not an economy at all: one tile of ground the enemy will not cross. It is
@@ -623,8 +624,8 @@ const C = {
   // trade than it looked. It pays what it always meant: three hands, ashore,
   // for good.
   FEATURES: {
-    cache: { count: 12, gold: 100, action: 'dig up' },
-    spring: { count: 1, hands: 3, action: 'draw from' },
+    cache: { count: 12, gold: 50, action: 'dig up' },
+    spring: { count: 1, hands: 2, action: 'draw from' },
     officer: { count: 1, action: 'save' },
     // A wreck is a ship, so she is carrying a ship's stores: her timbers, the
     // iron out of her fittings, and what little was in the strongbox. Written

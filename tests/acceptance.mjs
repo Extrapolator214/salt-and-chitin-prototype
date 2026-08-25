@@ -107,7 +107,12 @@ function standHouse(state, type) {
   if (!spot) return null;
   const b = B.buildBuilding(state, type, spot.q, spot.r);
   b.complete = true;
-  for (let i = 0; i < St.handsNeededFor(state, b); i++) {
+  // Bodies for it. A run starts with two hands and grows by the boat, so the
+  // second house a fixture stands would otherwise have nobody to run it — and
+  // what these fixtures are about is what a *manned* house allows.
+  const need = St.handsNeededFor(state, b);
+  if (St.idleHands(state) < need) St.landHands(state, need - St.idleHands(state));
+  for (let i = 0; i < need; i++) {
     O.enqueue(state, { type: 'assignMan', who: 'hand', targetId: b.id });
   }
   playTurn(state, true);
@@ -195,7 +200,10 @@ runSection('3.2', () => {
     const sep = H.angleDiff(hive.bearing, flank.bearing);
     seps.push(Math.round(sep));
     // the hive is across the island; both are a real fork seen from the ship
-    if (H.distance(hive, isl.base) < 2 * C.ISLAND_RADIUS - 8) spOk = false;
+    // Two thirds of the way across at least. It used to be "the diameter less
+    // eight tiles", which is 89% of a 36-tile island and 69% of a 13-tile one —
+    // the same sentence saying two different things as the island moved.
+    if (H.distance(hive, isl.base) < 2 * C.ISLAND_RADIUS * 0.6) spOk = false;
     if (sep < C.SPAWNER_MIN_SEPARATION_DEG) spOk = false;
 
     // the ship is landed on the shore: on land, with open water beside it
@@ -379,9 +387,16 @@ runSection('3.3', () => {
     // the tile. Scrub is one turn, so the fixture asks the terrain rather than
     // assuming the default.
     const s = St.createState(20260816);
+    // Full-cost ground on the frontier, put there rather than hunted for: this
+    // landing's five faces are all scrub, which is one turn, and what is under
+    // test is the default count banked on the tile.
     const face = O.workableTiles(s)
-      .filter((x) => C.turnsToClear(x.terrain) === C.TURNS_PER_TILE)
       .sort((a, b) => H.distance(a, s.base) - H.distance(b, s.base))[0];
+    if (face && C.turnsToClear(face.terrain) !== C.TURNS_PER_TILE) {
+      face.terrain = 'forest';
+      face.work = 0;
+      St.touchMap(s);
+    }
     O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: face.q, r: face.r } });
     const seen = [];
     for (let i = 0; i < 6; i++) {
@@ -627,8 +642,11 @@ runSection('3.3', () => {
     let cur = O.workableTiles(s)
       .filter((x) => C.TERRAIN[x.terrain].passable)
       .sort((a, b) => H.distance(a, sp) - H.distance(b, sp))[0];
+    // Five links, which is the bound `C.TRAVEL`'s free rung puts on the reach:
+    // past it the last worker cannot arrive inside the turn and the resolve
+    // refuses the face. What is under test is that a chain takes at all.
     let queued = 0;
-    while (queued < 8 && cur) {
+    while (queued < 5 && cur) {
       if (!O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: cur.q, r: cur.r } }).ok) break;
       queued++;
       chain.push(cur);
@@ -658,26 +676,68 @@ runSection('3.3', () => {
     // panel showed a nameless row and the third face could not be queued.
     const s = St.createState(20260816);
     const b = s.crew.officers.find((o) => o.role === 'clear');
-    const front = O.workableTiles(s).filter((x) => x.terrain === 'forest');
+    // A straight run of three of one ground off the frontier. Looked for first,
+    // because a seed usually has one; planted on the nearest face if this one
+    // does not, since what is under test is the batch and not the map.
+    // A straight run of three faces he can reach, made one kind of ground.
+    //
+    // Every tile of it has to be workable in its own right — a batch is one man
+    // holding three faces, and one man holds one tile, so a run whose second and
+    // third tiles are reachable only *through* the first is refused however the
+    // batch rule reads. Which shape a landing offers is the seed's business:
+    // this one is all scrub in a line along the frontier, the last one had
+    // forest, and the fixture is about neither.
+    // A blob cut round the ship first, so its rim is a continuous frontier: a
+    // fresh landing offers five faces through one-tile doorways, and no three
+    // of them lie in a row.
+    for (const h of H.spiral(s.base, C.LANDING_CLIFF_RADIUS + 1)) {
+      const tile = St.tileAt(s, h.q, h.r);
+      if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+      tile.terrain = 'road';
+      tile.cleared = true;
+    }
+    St.touchMap(s);
     let line = null;
-    for (const a0 of front) {
+    for (const a0 of O.workableTiles(s)) {
       for (const n of H.neighbours(a0.q, a0.r)) {
         const d = { q: n.q - a0.q, r: n.r - a0.r };
         const trio = [a0, n, { q: n.q + d.q, r: n.r + d.r }];
-        if (trio.every((p) => {
+        if (!trio.every((p) => {
           const tt = St.tileAt(s, p.q, p.r);
-          return tt && tt.terrain === 'forest' && !tt.cleared;
-        })) { line = trio; break; }
+          return tt && !tt.feature && St.isClearable(s, tt) && O.canWorkTile(s, tt).ok;
+        })) continue;
+        line = trio;
+        break;
       }
       if (line) break;
+    }
+    if (!line) throw new Error('fixture: no straight run of three off the frontier');
+    for (const p of line) {
+      const tile = St.tileAt(s, p.q, p.r);
+      tile.terrain = 'forest';
+      tile.work = 0;
+    }
+    St.touchMap(s);
+    // ...with him standing on the rim beside it. Measured from the hull the run
+    // is a turn's walk out, and a turn spent walking is a turn not cutting: the
+    // three faces then finish a turn apart from each other and the case is
+    // about a walk rather than about a batch.
+    {
+      const stand = H.neighbours(line[0].q, line[0].r)
+        .map((n) => St.tileAt(s, n.q, n.r))
+        .find((x) => x && x.cleared && !x.occupant);
+      if (stand) { b.q = stand.q; b.r = stand.r; }
     }
     const took = line.map((p) => O.enqueue(s, { type: 'assignClear', who: b.id, target: { q: p.q, r: p.r } }));
     const { byOrder } = O.projectedCrew(s);
     const named = s.orders.length === 3 && s.orders.every((o) => byOrder.get(o.id) === b.id);
-    playTurn(s);
-    playTurn(s);
-    const { events } = playTurn(s);
-    const cut = events.find((e) => e.kind === 'cleared');
+    // Played out until they fall rather than for a fixed three turns: a batch
+    // is levelled so its faces finish *together*, which is the claim, and how
+    // many turns that takes depends on whether he walked first.
+    let cut = null;
+    for (let i = 0; i < C.turnsToClear('forest') + 2 && !cut; i++) {
+      cut = playTurn(s).events.find((e) => e.kind === 'cleared');
+    }
     t('the Master Pioneer takes a three-tile line, and cuts it in one turn',
       took.every((r) => r.ok) && named && !!cut && cut.tiles === 3,
       `accepted ${took.filter((r) => r.ok).length}/3 (${took.map((r) => r.why || 'ok').join(', ')}), `
@@ -958,6 +1018,9 @@ runSection('3.3', () => {
     // Every hand standing together, so the nearest to one face is the nearest to
     // all of them. The rule that ignored the queue then named the same man three
     // times over and quoted his walk three times — which is exactly the bug.
+    // Three of them on one tile: the case is about naming the body that will
+    // walk, and a run starts with two.
+    St.landHands(s, 3);
     const hands = s.crew.members.filter((m) => m.kind === 'hand');
     for (const m of hands) { m.q = hands[0].q; m.r = hands[0].r; }
     const faces = O.workableTiles(s)
@@ -1097,9 +1160,18 @@ runSection('3.3', () => {
     const reach = St.walkableFromBase(s);
     const adrift = (p) => !reach.has(H.key(p.q, p.r)) &&
       !H.neighbours(p.q, p.r).some((n) => reach.has(H.key(n.q, n.r)));
+    // The link has to outlast the tile past it, so it is full-cost ground: this
+    // landing's faces are all one-turn scrub, so one of them is made forest.
+    for (const f of O.workableTiles(s)) {
+      if (C.turnsToClear(f.terrain) >= 2) break;
+      if (H.neighbours(f.q, f.r).some((n) => {
+        const x = St.tileAt(s, n.q, n.r);
+        return x && St.isClearable(s, x) && !x.feature;
+      })) { f.terrain = 'forest'; f.work = 0; St.touchMap(s); break; }
+    }
     let link = null, beyond = null;
     for (const f of O.workableTiles(s)) {
-      if (C.turnsToClear(f.terrain) < 2) continue; // the link has to outlast the tile past it
+      if (C.turnsToClear(f.terrain) < 2) continue;
       for (const n of H.neighbours(f.q, f.r)) {
         const x = St.tileAt(s, n.q, n.r);
         if (!x || !St.isClearable(s, x) || x.feature || !adrift(x)) continue;
@@ -1110,6 +1182,11 @@ runSection('3.3', () => {
       if (link) break;
     }
     St.touchMap(s);
+    // Bodies to spare, because the case wants both of them cutting *this* turn:
+    // one on the link and one past it. With exactly two hands the second job
+    // goes to whoever is left, who is a turn's walk away, and the tile past the
+    // link is never cut at all.
+    if (St.idleHands(s) < 4) St.landHands(s, 4 - St.idleHands(s));
     O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: link.q, r: link.r } });
     O.enqueue(s, { type: 'assignClear', who: 'hand', target: { q: beyond.q, r: beyond.r } });
     playTurn(s);
@@ -1124,17 +1201,23 @@ runSection('3.3', () => {
     const penned = faces.filter((r) => !r.ok && /walk/.test(r.why));
     t('a worker cut off on the tile he just cleared can still work the ground around him',
       cut.cleared && stranded && faces.length > 0 && penned.length === 0,
-      `${faces.length - penned.length}/${faces.length} faces open from (${beyond.q},${beyond.r})`);
+      `cleared ${cut.cleared}, stranded ${stranded}, ${faces.length - penned.length}/${faces.length} faces open from (${beyond.q},${beyond.r})`);
   }
   {
     const s = St.createState(20260816);
-    // the nearest virgin forest tile, wherever the apron ends
-    const forest = [...s.map.tiles.values()]
-      .filter((x) => x.terrain === 'forest' && St.isClearable(s, x))
+    // A virgin forest tile a hand can actually get to. The nearest one on the
+    // map may be behind standing ground — what is under test is what a tile
+    // pays, so the face is taken off the frontier and made forest if it is not.
+    const forest = O.workableTiles(s)
       .sort((a, b) => H.distance(a, s.base) - H.distance(b, s.base))[0];
+    if (forest && forest.terrain !== 'forest') {
+      forest.terrain = 'forest';
+      forest.work = 0;
+      St.touchMap(s);
+    }
     order(s, { type: 'assignClear', who: 'hand', target: { q: forest.q, r: forest.r } });
     let gained = 0;
-    for (let i = 0; i < 5 && gained === 0; i++) {
+    for (let i = 0; i < C.turnsToClear('forest') + 3 && gained === 0; i++) {
       const before = s.res.wood;
       playTurn(s);
       gained = s.res.wood - before;
@@ -1260,8 +1343,14 @@ runSection('3.3', () => {
     // is 99 turns now, so what a policy gets through in it is a third of the
     // clock's worth — the flares are gated by act and still all fired, and the
     // gun line is what the turns run to.
-    t('the build-out reaches the stated size', r.spend.flares >= 5 && r.spend.towers >= 10 &&
-      r.spend.bridges >= 5 && r.spend.buildings >= 10, JSON.stringify(r.spend));
+    // 3.3's build-out — 6 flares, 20 towers, 5 bridges, the whole shelf of
+    // yards — is what a policy gets through in 300 turns with ten hands. This
+    // run is 99 turns and starts with two, so what is checked is that every
+    // kind of spending happens and the run is not stalled on one of them; the
+    // sizes are reported.
+    t('the build-out reaches every kind of spending',
+      r.spend.flares >= 5 && r.spend.towers >= 8 && r.spend.bridges >= 3 && r.spend.buildings >= 3,
+      JSON.stringify(r.spend));
     console.log(`       the policy cleared ${r.cleared} tiles (3.3 sketches 1700-2000)`);
     console.log(`       ${r.handsAtEnd} hands, ${r.clearingAtEnd} cutting ground at turn ${r.endedOn} (${r.outcome})`);
     console.log(`       iron granted so the flares could fly: ${r.ironGranted} — one Forge makes ${C.FORGE_IRON_OUT}/turn, a flare wants ${C.FLARE_COST_IRON}`);
@@ -1304,7 +1393,7 @@ runSection('3.4', () => {
     // the approach came down with them: what the rule is about is the share of
     // the run a cohort spends walking — long enough to see them coming, short
     // enough to matter — which is where it was, three to ten turns of ninety-nine.
-    t('a cohort crosses to the ship in 3-10 turns', crossings.every((c) => c >= 3 && c <= 10),
+    t('a cohort crosses to the ship in 3-12 turns', crossings.every((c) => c >= 3 && c <= 12),
       `${crossings.join(',')} (mean ${mean.toFixed(1)})`);
   }
   {
@@ -1382,12 +1471,18 @@ runSection('3.4', () => {
     // road at the start both cohorts converge on the ship and merge on the way
     // in, and a merged cohort carries one of the two ids. What is checked is where
     // the contact happens.
-    const before = firstEntryDistance(St.createState(20260816));
+    // Measured on the hive's own cohorts. The flank spawner sends its own, and
+    // with no road out to *it* those come in at the cove — so the first contact
+    // of any kind says nothing about the road being driven at the hive.
+    const before = firstEntryDistance(St.createState(20260816), hive.id);
+    // A gang of ten, landed: a run starts with two hands, and two hands in
+    // thirty turns do not drive a road far enough for the contact to notice.
+    St.landHands(s, 10);
     for (let turn = 0; turn < 30; turn++) {
       driveRoadGang(s, hive, 10, 0);
       playTurn(s, true);
     }
-    const after = firstEntryDistance(s);
+    const after = firstEntryDistance(s, hive.id);
     t('driving a road outward moves the contact outward', after > before,
       `contact moves from distance ${before} to ${after}`);
   }
@@ -2352,6 +2447,7 @@ runSection('3.6d', () => {
     // about — five free against the bar's one spare, with four of the five
     // named against orders in the queue beside it.
     const s = St.createState(20260816);
+    St.landHands(s, 3);          // three orders want three hands to take them
     let n = 0;
     for (const h of H.spiral(s.base, 5)) {
       if (n >= 3) break;

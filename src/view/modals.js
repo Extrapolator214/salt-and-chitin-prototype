@@ -178,151 +178,132 @@ const GUIDE = [
   {
     id: 'run',
     name: 'The run',
-    body: (state) => `
-      <p>You have run a ship aground on an island that is already occupied. You win by
-      destroying <b>both spawners</b>; you lose if the hull reaches 0, or if the run
-      passes turn ${C.TURNS_PER_RUN} with either spawner still standing.</p>
-      <p>The run is ${C.ACTS} acts of ${C.TURNS_PER_ACT} turns. A turn is: give orders,
-      press <b>End Turn</b>, watch the resolve. Orders are free to give and free to take
-      back — nothing is spent until the turn ends.</p>
-      <p><b>How to play it:</b> open ground, dig up the gold that is buried in it, buy
-      guns with the gold, and use the turns the guns hold for you to walk a sabotage team
-      out to each spawner.</p>`,
+    body: () => `
+      <p>Your ship is aground on an island that is already occupied. Destroy
+      <b>both spawners</b> to win. You lose if the hull reaches 0, or if turn
+      ${C.TURNS_PER_RUN} passes with either spawner still standing.</p>
+      <p>${C.ACTS} acts of ${C.TURNS_PER_ACT} turns. Each turn: give orders, press
+      <b>End Turn</b>, watch it play out. Orders cost nothing until the turn ends,
+      so anything you queue can be taken back.</p>
+      <p><b>How to play:</b> clear tiles, investigate points of interest, buy items
+      and craft guns, use the items and guns to build towers. Once you're defended,
+      launch sabotage missions to eliminate bug lairs.</p>`,
   },
   {
     id: 'clearing',
     name: 'Clearing',
-    body: (state) => `
-      <p>Nothing on the island is open but the beach you landed on. Cutting a tile takes
-      one worker ${C.TURNS_PER_TILE} turns and pays what the ground holds:
+    body: () => `
+      <p>Only the landing beach is open. Cutting a tile takes one worker
+      ${C.TURNS_PER_TILE} turns and pays what the ground holds:
       <b>${C.TERRAIN.forest.yield.wood} wood</b> a forest tile,
       <b>${C.TERRAIN.stone.yield.stone} stone</b> a boulder,
       <b>${C.TERRAIN.iron.yield.iron} iron</b> a seam. Scrub is one turn for
-      ${C.TERRAIN.scrub.yield.wood}.</p>
-      <p>A cut tile becomes <b>road</b>. Road is how everything of yours travels: your
-      crew walk it, your yards must stand beside it, and your sabotage teams march out
-      along it. Sand, salt flats and meadow are walked but can never be cut, so they join
-      your ground without ever becoming road.</p>
-      <p><b>How to do it:</b> click a tile on the frontier of your open ground and choose
-      a body to cut it. Shift-click to keep queueing. Work already done stays on the tile
-      if you pull somebody off it.</p>`,
+      ${C.TERRAIN.scrub.yield.wood}; old canopy is ${C.turnsToClear('canopy')}.</p>
+      <p>A cut tile becomes <b>road</b>. Road is how your side travels: the crew
+      walk it, yards must stand beside it, and sabotage teams march out along it.
+      Sand, salt and meadow are walkable but can never be cut.</p>
+      <p><b>Do it:</b> click a tile on the edge of your open ground and pick who
+      cuts it. Shift-click to keep queueing. Part-cut work stays on the tile.</p>`,
   },
   {
     id: 'crew',
     name: 'Crew',
     body: (state) => `
-      <p>You come ashore with <b>${C.HANDS_START} hands</b> and your officers. Hands cut
-      ground, man buildings and guns, dig up what is buried, and go on missions. They are
-      the scarcest thing you have.</p>
-      <p>More of them arrive by <b>flare</b>: ${costText(B.flareCost(state))} brings
-      <b>${C.FLARE_HANDS} hands</b>, landing in ${B.flareDelay(state)} turn(s), with
-      ${C.FLARE_COOLDOWN} turns between boats. Each act allows more —
-      ${C.FLARE_GATE.join(', ')} cumulative by act. The island itself pays in people too:
-      a freshwater spring is worth ${C.FEATURES.spring.hands} hands, and there is one
-      castaway on the map who joins as an officer.</p>
-      <p>Officers are worth more than hands and each has one trade: the Master Pioneer
-      cuts ${C.BUILDER_TILES_PER_TURN} tiles a turn, the Weapons Master takes
-      ${Math.round(C.WEAPONS_MASTER_DISCOUNT * 100)}% off every fitting, the Master Gunner
+      <p>You land with <b>${C.HANDS_START} hands</b> and your officers. Hands cut
+      ground, man buildings and guns, dig up what is buried, and go on missions.
+      Nothing happens without them.</p>
+      <p>More arrive by <b>flare</b>: ${costText(B.flareCost(state))} brings
+      <b>${C.FLARE_HANDS} hands</b> in ${B.flareDelay(state)} turn${B.flareDelay(state) === 1 ? '' : 's'}, with
+      ${C.FLARE_COOLDOWN} turns between boats and ${C.FLARE_GATE.join('/')} allowed by
+      act. The island pays in people too — a spring is worth
+      ${C.FEATURES.spring.hands} hands, and one castaway joins as an officer.</p>
+      <p>Officers each have one trade: the <b>Pioneer</b> cuts
+      ${C.BUILDER_TILES_PER_TURN} tiles a turn, the <b>Weapons Master</b> takes
+      ${Math.round(C.WEAPONS_MASTER_DISCOUNT * 100)}% off fittings, the <b>Gunner</b>
       mans a tower alone for +${Math.round(C.GUNNER_POWER_BONUS * 100)}% power, and the
-      Sapper Captain leads sabotage missions at
-      ${Math.round(C.SUCCESS_CAPTAIN * 100)}%.</p>
-      <p><b>How to do it:</b> never end a turn with anybody idle — the bar tells you when
-      somebody is. Fire a flare the moment you can afford one.</p>`,
+      <b>Sapper Captain</b> leads missions at ${Math.round(C.SUCCESS_CAPTAIN * 100)}%.</p>
+      <p><b>Do it:</b> never end a turn with anyone idle, and fire a flare as soon
+      as you can afford one.</p>`,
   },
   {
     id: 'buildings',
     name: 'Yards',
-    body: (state) => `
-      <p>A yard is a fixed shape of ${C.buildingDef('bunkhouse').tiles}-${C.buildingDef('sappers').tiles}
-      tiles. It must stand on open ground with <b>road joined to the ship beside it</b>,
-      it may not touch another yard (${C.BUILDING_GAP} tile clear), and it does nothing
-      until it is <b>manned</b> — ${C.BUILDING_HANDS} hands, or ${C.BUILDING_HANDS_BUNKHOUSE}
-      inside a Bunkhouse's reach.</p>
-      <p>The ones that matter most: the <b>Peculiar Merchant</b> sells the fittings your
-      guns are made of; the <b>Warehouse</b> makes your hold unlimited, which is what lets
-      you merge fittings up; the <b>Powder Store</b> makes flares cheaper and faster; the
-      <b>Sappers' Camp</b> is the only way to raise a mission, and so the only way to win.</b></p>
-      <p><b>How to do it:</b> ${C.CREW_UPGRADE_GOLD} gold buys a yard's crew back for
-      good — with a small company that is often worth more than another gun. A yard the
-      swarm walks over is <b>ruined</b>, not destroyed; rebuilding is a fraction of the
-      price.</p>`,
+    body: () => `
+      <p>A yard is a fixed shape of
+      ${Math.min(...C.liveBuildings().map((b) => b.tiles))}-${Math.max(...C.liveBuildings().map((b) => b.tiles))}
+      tiles. It needs cleared ground, road beside it joined to the ship, and
+      ${C.BUILDING_GAP} tile clear of the next yard. It does nothing until it is
+      <b>manned</b> — ${C.BUILDING_HANDS} hands, or fewer where its own line says so.</p>
+      <p>The <b>Peculiar Merchant</b> sells fittings. The <b>Workshop</b> crafts them.
+      The <b>Warehouse</b> makes the hold unlimited, which is what lets you merge
+      fittings up. The <b>Powder Store</b> makes flares cheaper. The
+      <b>Sappers' Camp</b> is the only way to raise a mission.</p>
+      <p><b>Do it:</b> ${C.CREW_UPGRADE_GOLD} gold buys a yard's crew back for good.
+      A yard the swarm reaches is <b>ruined</b>, not destroyed — rebuilding is cheap.</p>`,
   },
   {
     id: 'towers',
     name: 'Guns',
-    body: (state) => `
-      <p>A gun is two things: an <b>emplacement</b> (${costText(C.TOWER_COST)}, built on
-      open ground) and a <b>fitting</b> out of your hold. This build offers
-      ${C.liveTowers().length} kinds — ${C.liveTowers().map((x) => x.name).join(' and ')} — and their
-      fittings are not interchangeable: a Parrot Cage does nothing in a Swivel Gun Post.
-      The rest of the shelf is listed but <b>${C.SHELVED_WHY}</b>.</p>
-      <p>Fittings come from exactly one place each: the iron ones are crafted at a
-      <b>Workshop</b> for ${C.ITEM_CRAFT_IRON} iron, the rest are bought at a
-      <b>Peculiar Merchant</b> for ${C.ITEM_BUY_GOLD} gold. Two fittings of the same tier
-      merge into one of the next, so a tier-${C.MAX_TIER} gun is
-      ${2 ** (C.MAX_TIER - 1)} tier-1 fittings — and it is worth
+    body: () => `
+      <p>A gun is an <b>emplacement</b> (${costText(C.TOWER_COST)}) plus a
+      <b>fitting</b> from your hold. This build offers
+      ${C.liveTowers().map((x) => x.name).join(' and ')}; the rest of the shelf is
+      listed but <b>${C.SHELVED_WHY}</b>. Fittings are not interchangeable.</p>
+      <p>Iron fittings are crafted at a <b>Workshop</b> for ${C.ITEM_CRAFT_IRON} iron;
+      the rest are bought at a <b>Merchant</b> for ${C.ITEM_BUY_GOLD} gold. Two of the
+      same tier merge into one of the next, so a tier-${C.MAX_TIER} gun is
+      ${2 ** (C.MAX_TIER - 1)} tier-1 fittings — and worth
       ${C.power(C.MAX_TIER).toFixed(0)} power against a tier-1's ${C.power(1).toFixed(0)}.</p>
-      <p>Ranges are short (${Math.min(...C.liveTowers().map((x) => x.range))}-${Math.max(...C.liveTowers().map((x) => x.range))} tiles),
-      so <b>where</b> a gun stands is most of what it is worth: put it where the swarm
-      will actually walk. A gun needs ${C.TOWER_MANNING[1]} hand to fire. Two tier-5s of
-      partner kinds can be <b>evolved</b> at a Tinker's Shed into one gun worth
-      ${C.power(C.MAX_TIER, true).toFixed(0)}.</p>
-      <p><b>How to do it:</b> buy in pairs, merge up, and fit the best you have. Guns are
-      never attacked — the swarm goes around them.</p>`,
+      <p>Ranges are short, so <b>where</b> a gun stands is most of what it is worth:
+      put it where the swarm will walk. One hand fires it. Guns are never attacked —
+      the swarm goes around them.</p>`,
   },
   {
     id: 'gold',
     name: 'Gold',
-    body: (state) => `
-      <p>Gold is what guns are made of, and almost all of it is buried on the island:
-      <b>${C.FEATURES.cache.count} treasure caches</b> at ${C.FEATURES.cache.gold} gold
-      each, plus ${C.FEATURES.wreck.count} wrecks carrying
-      ${C.FEATURES.wreck.wood} wood, ${C.FEATURES.wreck.iron} iron and
-      ${C.FEATURES.wreck.gold} gold apiece.</p>
-      <p>A point of interest is worked by <b>one hand standing on it</b>, and only once
-      the ground above it is open — so a chest under forest is one job to cut and one to
+    body: () => `
+      <p>Gold buys fittings, and nearly all of it is buried here:
+      <b>${C.FEATURES.cache.count} caches</b> at ${C.FEATURES.cache.gold} gold each,
+      and ${C.FEATURES.wreck.count} wrecks carrying ${C.FEATURES.wreck.wood} wood,
+      ${C.FEATURES.wreck.iron} iron and ${C.FEATURES.wreck.gold} gold apiece.</p>
+      <p>One hand works a point of interest by standing on it, and only once the
+      ground above it is open — a chest under forest is one job to cut and one to
       dig. It pays in a single turn.</p>
-      <p><b>How to do it:</b> cut toward the nearest chests first. One chest is
-      ${Math.floor(C.FEATURES.cache.gold / C.ITEM_BUY_GOLD)} fittings, which is most of a
-      tier-5 gun, which is the difference between holding act 2 and not.</p>`,
+      <p><b>Do it:</b> cut toward the nearest chests first. Gold arrives before
+      anything else can.</p>`,
   },
   {
     id: 'enemy',
     name: 'The enemy',
-    body: (state) => `
+    body: () => `
       <p>Two spawners sit across the island. Every ${C.ACCUMULATE_TURNS} turns each
-      releases a <b>cohort</b> that walks toward the nearest tile of your open ground and
-      then follows it to your ship. Grubs are fast and many; Shells are slow and armoured.
-      Whatever gets through takes hull off: ${C.UNITS.grub.hullDamage} a grub,
+      sends a <b>cohort</b>, which walks to the nearest tile of your open ground and
+      follows it to your ship. Grubs are fast and many; Shells are armoured. Anything
+      that gets through takes hull: ${C.UNITS.grub.hullDamage} a grub,
       ${C.UNITS.shell.hullDamage} a shell, out of ${C.HULL_MAX}.</p>
       <p>Every ${C.ESCALATION_TURNS} turns a spawner gains a <b>star</b>, and each act
-      begins with ${C.ACT_ESCALATION} more on top. A star is
-      ${C.UNITS_PER_STAR} more units <i>and</i> tougher ones — numbers climb in a line,
-      hp and armour climb by the square. A gun line that held last act will not hold this
-      one.</p>
-      <p><b>How to do it:</b> the fight resolves itself; you only watch. What decides it
-      was decided before you pressed End Turn — where your guns are, what tier they are,
-      and how much of your ground the swarm has to cross to reach you.</p>`,
+      begins with ${C.ACT_ESCALATION} more. A star is ${C.UNITS_PER_STAR} more units
+      <i>and</i> tougher ones. A gun line that held last act will not hold this one.</p>
+      <p><b>Do it:</b> the fight resolves itself — you only watch. It was decided
+      before you pressed End Turn.</p>`,
   },
   {
     id: 'sabotage',
     name: 'Sabotage',
     body: (state) => `
       <pre class="art">${esc(art.SABOTAGE)}</pre>
-      <p>A spawner can only be destroyed by a <b>sabotage team</b>, and you need a manned
-      <b>Sappers' Camp</b> to raise one. The team walks out on foot, gathers on open
-      ground <b>${C.STAGING_DISTANCE} tiles</b> from the spawner, and goes in
-      ${C.STRIKE_TURNS} turn(s) later — so a mission takes as long as the walk, and the
-      walk is the road you cut.</p>
-      <p>Who leads it is the whole of it: the <b>Sapper Captain</b> goes at
+      <p>Only a <b>sabotage team</b> can destroy a spawner, and you need a manned
+      <b>Sappers' Camp</b> to raise one. The team walks out, gathers
+      <b>${C.STAGING_DISTANCE} tiles</b> from the spawner, and goes in
+      ${C.STRIKE_TURNS === 1 ? 'the next turn' : `${C.STRIKE_TURNS} turns later`}. A mission is as long as the walk, and the walk
+      is the road you cut.</p>
+      <p>Who leads decides it: the <b>Sapper Captain</b> at
       ${Math.round(C.SUCCESS_CAPTAIN * 100)}% with a team of ${C.ASSAULT_HANDS_CAPTAIN},
-      another lieutenant at ${Math.round(C.SUCCESS_NAMED * 100)}%, and a team with nobody
-      over it at ${Math.round(C.SUCCESS_GENERIC * 100)}%. Nobody dies on a failure; it
-      costs ${A.downtimeTurns(state)} turns of downtime.</p>
-      <p>The <b>flanking spawner falls first</b> — the hive is not a legal target until
-      nothing else is standing.</p>
-      <p><b>How to do it:</b> start cutting toward the flank early. The road is the
-      mission.</p>`,
+      another officer at ${Math.round(C.SUCCESS_NAMED * 100)}%, nobody at
+      ${Math.round(C.SUCCESS_GENERIC * 100)}%. Failure costs
+      ${A.downtimeTurns(state)} turns and no lives.</p>
+      <p>The <b>flanking spawner falls first</b> — the hive is not a target until
+      nothing else stands. Click the gathering tile to see the party, or call it off.</p>`,
   },
 ];
 
@@ -454,10 +435,13 @@ const VIEWS = {
     h += `<tr><th>manning</th><td colspan="3">${m.crew.length}/${m.need}${m.gunner ? ' — the Master Gunner alone, +50% power' : ''} ${m.manned ? '' : '<span class="why">not firing</span>'}</td></tr>`;
     h += '</table>';
 
+    // The yard is at work on it. Called out rather than noted, because it is the
+    // reason every Fit button below is greyed and a reader who skims past a note
+    // is left looking at a panel that seems broken.
     if (tw.merging) {
-      h += `<p class="note">Being raised to <b>tier ${tw.merging.toTier}</b> — `
+      h += `<p class="working"><b>Being raised to tier ${tw.merging.toTier}</b> — `
         + `${tw.merging.turnsLeft} turn${tw.merging.turnsLeft === 1 ? '' : 's'} of work left. `
-        + 'It fires at the tier it has while the work goes on.</p>';
+        + 'It fires at the tier it has while the work goes on, and takes no other fitting until it is done.</p>';
     }
 
     h += `<h3>fit a ${esc(C.itemName(tw.towerIndex))}</h3>`;
@@ -615,13 +599,19 @@ const VIEWS = {
     }
     h += '</table>';
 
-    h += '<h3>crew upgrade</h3>';
-    const up = { type: 'upgradeCrew', buildingId: b.id };
-    const canUp = O.canEnqueue(state, up);
-    h += `<p class="note">${C.CREW_UPGRADE_GOLD} gold on its works, once, and it runs with <b>one hand fewer</b>. ` +
-      `It stacks with a Bunkhouse — upgraded and inside one, it wants nobody at all.</p>`;
-    h += btn(b.upgraded ? 'Upgraded' : `Upgrade (${C.CREW_UPGRADE_GOLD} gold)`, 'order', up, !canUp.ok) +
-      (canUp.ok ? '' : ` <span class="why">${esc(canUp.why)}</span>`);
+    // Not offered where there is nothing to buy. A Palisade runs on nobody by
+    // definition, so an upgrade that takes a hand off it is fifty gold for a
+    // hand it never had — and the section said as much in a greyed button and a
+    // paragraph explaining a rule that could not apply to what was on screen.
+    if ((C.buildingDef(b.type) || {}).crew !== 0) {
+      h += '<h3>crew upgrade</h3>';
+      const up = { type: 'upgradeCrew', buildingId: b.id };
+      const canUp = O.canEnqueue(state, up);
+      h += `<p class="note">${C.CREW_UPGRADE_GOLD} gold on its works, once, and it runs with <b>one hand fewer</b>. ` +
+        `It stacks with a Bunkhouse — upgraded and inside one, it wants nobody at all.</p>`;
+      h += btn(b.upgraded ? 'Upgraded' : `Upgrade (${C.CREW_UPGRADE_GOLD} gold)`, 'order', up, !canUp.ok) +
+        (canUp.ok ? '' : ` <span class="why">${esc(canUp.why)}</span>`);
+    }
 
     h += demolishSection(state, b);
     return h;

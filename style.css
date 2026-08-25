@@ -327,3 +327,14 @@ kbd { color: var(--dim); font-size: 11px; }
 /* The one page with a picture on it; the art is wider than the pane is at the
    narrow end, and a diagram that wraps is not a diagram. */
 .guide .pane pre.art { overflow-x: auto; margin: 0 0 10px; }
+
+/* A structure part way through work of its own — a gun having a better fitting
+   worked in, say. It is not a refusal and not a note: it is the state the panel
+   below it is in, and the reason half of that panel is greyed. */
+#modal .working {
+  margin: 8px 0;
+  padding: 5px 9px;
+  border-left: 2px solid var(--warn);
+  background: #23262c;
+  color: var(--warn);
+}

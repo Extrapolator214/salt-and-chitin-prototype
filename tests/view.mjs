@@ -103,9 +103,14 @@ const fighting = St.createState(20260816);
   // The fitting goes into the hold first: without one the site is refused for
   // the hold rather than for the ground.
   B.addItem(fighting, 0, 1);
+  // Beside the lane, never on it. A gun's tile is ground the swarm will not
+  // charge over, so an emplacement dropped into the middle of the only road cuts
+  // the path it was built to cover — and `beginCombat` then makes no contact at
+  // all, which is the wall working and a fixture that never fights.
+  const onLane = new Set(lane.map((p) => H.key(p.q, p.r)));
   for (const h of H.spiral(lane[4], 2)) {
     const tt = St.tileAt(fighting, h.q, h.r);
-    if (!tt || tt.occupant) continue;
+    if (!tt || tt.occupant || onLane.has(H.key(h.q, h.r))) continue;
     tt.terrain = 'road'; tt.cleared = true;
     St.touchMap(fighting);
     if (!B.canBuildTower(fighting, h.q, h.r, 0).ok) continue;
@@ -185,6 +190,120 @@ t('a resolve puts rounds in the air',
 }
 
 const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Cut a way in to a spawner's staging ground.
+ *
+ * A mission gathers `STAGING_DISTANCE` tiles off the spawner, on open ground the
+ * crew can walk to. A straight road from the ship reaches the mound's edge and
+ * no further, so on most seeds every tile of that ring is still standing wood —
+ * which is a true state of the world and a fixture that cannot pose its case.
+ */
+const openStaging = (state, spawner) => {
+  // The ring the team may gather on, and the nearest tile of it to the ship.
+  const ring = [];
+  const seen = new Set();
+  for (const f of spawner.footprint) {
+    for (const p of H.ring(f, C.STAGING_DISTANCE)) {
+      const k = H.key(p.q, p.r);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const tile = St.tileAt(state, p.q, p.r);
+      if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+      if (spawner.footprint.some((g) => H.distance(g, p) < C.STAGING_DISTANCE)) continue;
+      ring.push(p);
+    }
+  }
+  const head = ring.sort((a, b) => H.distance(a, state.base) - H.distance(b, state.base))[0];
+  if (!head) return;
+  // A road to *that* tile, not to the mound: a line drawn at the spawner itself
+  // stops at its edge, and the ring is off to the sides of where it stopped.
+  for (const p of [...H.line(state.base, head), head, ...ring]) {
+    const tile = St.tileAt(state, p.q, p.r);
+    if (!tile || tile.occupant) continue;
+    // A bay across the line is a broken road and an unreachable staging ground.
+    // The fixture is not about the coastline, so the water becomes beach.
+    tile.terrain = tile.terrain === 'saltwater' ? 'sand' : 'road';
+    tile.cleared = tile.terrain === 'road';
+  }
+  St.touchMap(state);
+};
+
+// ---- a gun with its yard at work --------------------------------------------
+//
+// Merging a fitting in takes three turns, and the gun goes on firing at the
+// tier it has. What it must not do is take a *different* fitting meanwhile: the
+// merge finishes by setting the tier to what it was rising toward, so a better
+// one dropped in behind it is a gun that quietly steps back down two turns
+// later. The panel says so where it cannot be skimmed past, and every Fit
+// button under it is dead.
+{
+  const s = St.createState(20260816);
+  s.res.wood = 1e6; s.res.stone = 1e6;
+  for (const h of H.spiral(s.base, 6)) {
+    const tile = St.tileAt(s, h.q, h.r);
+    if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+    tile.terrain = 'road'; tile.cleared = true;
+  }
+  St.touchMap(s);
+  const kind = C.liveTowers().find((d) => d.tiles <= 2).i;
+  for (let i = 0; i < 4; i++) B.addItem(s, kind, 1);
+  B.addItem(s, kind, 3);
+  const spot = H.spiral(s.base, 8).find((h) => B.canBuildTower(s, h.q, h.r, kind).ok);
+  const tw = spot && B.buildTower(s, spot.q, spot.r, kind);
+  if (tw) tw.complete = true;
+  const before = tw && O.canEnqueue(s, { type: 'fitItem', towerId: tw.id, tier: 3 });
+  if (tw) B.startTowerMerge(s, tw, tw.itemTier);
+  const during = tw && O.canEnqueue(s, { type: 'fitItem', towerId: tw.id, tier: 3 });
+  t('a gun takes no other fitting while its yard is working one in',
+    !!tw && before.ok && !during.ok && /rising to tier/.test(during.why || ''),
+    tw ? `before: ${before.ok ? 'ok' : before.why}; during: ${during.why}` : 'no tower spot');
+
+  const ui = { refresh: () => {} };
+  const el = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+  modals.open('tower', { id: tw.id }, ui);
+  modals.renderModal(s, el, {}, ui);
+  modals.close(ui);
+  const fits = [...el.innerHTML.matchAll(/<button([^>]*)>Fit</g)].map((m) => /disabled/.test(m[1]));
+  t('and the panel calls the work out and greys every Fit under it',
+    /class="working"/.test(el.innerHTML) && fits.length > 0 && fits.every(Boolean),
+    `${fits.filter(Boolean).length}/${fits.length} disabled, highlighted ${/class="working"/.test(el.innerHTML)}`);
+}
+
+// ---- a wall is not a workshop -----------------------------------------------
+//
+// The Palisade runs on nobody by definition, so the crew upgrade — fifty gold
+// to take a hand off a building — is fifty gold for a hand it never had. The
+// panel used to offer it anyway, greyed, under a paragraph about a rule that
+// could not apply to what was on the screen.
+{
+  const s = St.createState(20260816);
+  s.res.wood = 1e6; s.res.stone = 1e6; s.res.gold = 1e6;
+  for (const h of H.spiral(s.base, 6)) {
+    const tile = St.tileAt(s, h.q, h.r);
+    if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
+    tile.terrain = 'road'; tile.cleared = true;
+  }
+  St.touchMap(s);
+  const ui = { refresh: () => {} };
+  const el = { innerHTML: '', contains: () => false, querySelectorAll: () => [], querySelector: () => null };
+  const panelFor = (type) => {
+    const spot = H.spiral(s.base, 8).find((h) => B.canBuildBuilding(s, type, h.q, h.r).ok);
+    if (!spot) return null;
+    const b = B.buildBuilding(s, type, spot.q, spot.r);
+    b.complete = true;
+    modals.open('building', { id: b.id }, ui);
+    modals.renderModal(s, el, {}, ui);
+    modals.close(ui);
+    return el.innerHTML;
+  };
+  const wall = panelFor('wall');
+  const yard = panelFor('powder');
+  t('a Palisade is offered no crew upgrade, and a yard still is',
+    !!wall && !!yard && !/upgradeCrew/.test(wall) && /upgradeCrew/.test(yard),
+    `${wall ? (/upgradeCrew/.test(wall) ? 'wall offers it' : 'wall clean') : 'no wall spot'}, `
+    + `${yard ? (/upgradeCrew/.test(yard) ? 'yard offers it' : 'yard lost it') : 'no yard spot'}`);
+}
 
 // ---- the mission's own box --------------------------------------------------
 //
@@ -274,11 +393,7 @@ const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   St.landHands(s, 10);
   s.res.wood = 1e6; s.res.stone = 1e6;
   const sp = s.spawners.find((x) => x.kind !== 'hive');
-  for (const p of H.line(s.base, sp)) {
-    const tile = St.tileAt(s, p.q, p.r);
-    if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
-    tile.terrain = 'road'; tile.cleared = true;
-  }
+  openStaging(s, sp);
   for (const h of H.spiral(s.base, 6)) {
     const tile = St.tileAt(s, h.q, h.r);
     if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
@@ -304,11 +419,7 @@ const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     St.landHands(q, 10);
     q.res.wood = 1e6; q.res.stone = 1e6;
     const flank = q.spawners.find((x) => x.kind !== 'hive');
-    for (const p of H.line(q.base, flank)) {
-      const tile = St.tileAt(q, p.q, p.r);
-      if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;
-      tile.terrain = 'road'; tile.cleared = true;
-    }
+    openStaging(q, flank);
     for (const h2 of H.spiral(q.base, 6)) {
       const tile = St.tileAt(q, h2.q, h2.r);
       if (!tile || tile.occupant || tile.terrain === 'saltwater') continue;

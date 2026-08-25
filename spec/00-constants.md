@@ -57,9 +57,9 @@ not, and §3's yields went up instead.
 | `TURNS_PER_RUN` | 99 |
 | `TURNS_PER_ACT` | 33 |
 | `ACTS` | 3 |
-| `ISLAND_RADIUS` | 12 — was 36 |
-| `MAP_RADIUS` | 19 |
-| `MAP_TILES` | ~1100, of which ~420 are land |
+| `ISLAND_RADIUS` | 13 — was 36 |
+| `MAP_RADIUS` | 20 |
+| `MAP_TILES` | ~1250, of which ~495 are land |
 | `SPAWNER_RING` | 15 |
 | `BASE_FOOTPRINT` | 7 tiles (centre + 6 neighbours) |
 | `ARMADA_TURN` | 99 — run ends, loss if any spawner still stands |
@@ -71,8 +71,11 @@ not, and §3's yields went up instead.
 Yields below are the spec's. The build pays **nine** times each: three because a
 tile is three turns of one worker's labour rather than one, and three again
 because the run is a third as long — the crew have 99 turns to earn what they
-used to earn in 300, out of an island a ninth of the area. So forest is 27 wood,
-a boulder 45 stone and a seam 45 iron. Every *price* in this document is
+used to earn in 300, out of an island a ninth of the area. Stone and iron are
+nine times the spec's — a boulder is 45 and a seam 45 — and **wood is half of
+that again**, at 14 a forest tile: wood is the resource an island of this size
+has most of, and the clock's multiplier gave the crew more of it than the shelf
+knew what to do with. Every *price* in this document is
 unchanged, which is the whole of the rebalance: same shelf, same bills, a third
 of the clock to pay them out of.
 
@@ -80,9 +83,9 @@ Two terrains are not simply multiplied, and both are noted in the table.
 
 | terrain | clearable | yield | buildable | passable | advance mult | targetable while virgin | notes |
 |---|---|---|---|---|---:|---|---|
-| `forest` | yes | 3 wood | yes | yes | 3.0 | **no** | build: **27 wood**, 3 turns |
-| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **30 wood**, 3 turns — 10% more than forest |
-| `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: **9 wood**, **1 turn** — a third of forest's wood for a third of the work |
+| `forest` | yes | 3 wood | yes | yes | 3.0 | **no** | build: **14 wood**, 3 turns |
+| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **15 wood, 4 turns** — a tenth more wood than forest for a third more work, so it is the one ground that pays worse by the turn than what is beside it |
+| `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: **5 wood**, **1 turn** — a third of forest's wood for a third of the work |
 | `stone` | yes | 5 stone | yes | **no until cleared** | — | — | build: **45 stone**; boulders span 3–5 tiles |
 | `iron` | yes | **45 iron** | yes | **no until cleared** | — | — | not in the spec's enum — a seam worked like a boulder, 2% of the mix. The only iron that is not smelted |
 | `road` | already clear | 0 | yes | yes | 1.0 | yes | what every cleared tile becomes |
@@ -130,7 +133,7 @@ Build constants; the spec's corridor and apron are gone (see README).
 
 | constant | value |
 |---|---|
-| `HANDS_START` | 3 — plus the four officers. The crew is grown, not landed |
+| `HANDS_START` | **2** — plus the four officers. The crew is grown, not landed |
 | `HANDS_CAP` | 40 |
 | `TILES_PER_HAND_PER_TURN` | 1 |
 | `LABOUR_RESERVE_FLOOR` | 0.20 — advisory readout, not enforced |
@@ -143,7 +146,7 @@ Build constants; the spec's corridor and apron are gone (see README).
 |---|---|
 | `FLARE_COST_WOOD` | 250 — the build runs **120** |
 | `FLARE_COST_IRON` | 120 — the build runs **30**; see the README on why |
-| `FLARE_HANDS` | 3 |
+| `FLARE_HANDS` | **2** |
 | `FLARE_DELAY_TURNS` | 2 (1 with a Powder Store) |
 | `FLARE_GATE` | act I: 1 · act II: 2 · act III: 3 (cumulative max 6) |
 
@@ -177,7 +180,7 @@ Loss condition: `hull <= 0`.
 | power by tier | 1 · 2.5 · 6.25 · 15.63 · 39.06 |
 | `EVOLVED_MULT` | 2.5 → evolved tier 5 = 97.66 |
 | manning by tier | **1 hand at every tier · evolved: 2**. The spec's t4–5: 2 / evolved: 3 was written for a crew of ten that grew to forty; a company of three that grows a boat at a time cannot put two hands behind each of six guns and still cut ground |
-| footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below |
+| footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below. Every kind this build offers lost a tile when the island came down: nothing stands on more than 3 |
 | `TOWER_BUILD_COST` | 30 wood + 20 stone, plus one fitting of its kind from the hold, any tier |
 | `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory (and one being merged in) |
 | `TOWER_MERGE_TURNS` | 3 — a matching fitting merged into the gun, which fires throughout |
@@ -327,7 +330,7 @@ building that wants two takes two, and the third order is refused.
 | Sappers' Camp | 3 | 6 | assault teams can be raised |
 | Hospital | 2 | 3 | assault downtime 3 turns → 1 |
 | Powder Store | 2 | 3 | flare cost −25%, lands in 1 turn · **75 wood + 53 stone**, a quarter under the flat price |
-| Excavation Camp | 3 | 4 | works one treasure cache; 100 gold over 10 turns |
+| Excavation Camp | 3 | 4 | works one treasure cache; 50 gold over 10 turns — shelved in this build |
 | Bunkhouse | 2 | 3 | buildings within radius 3 cost 1 hand |
 | Palisade | — | 1 | the enemy will not cross it; no crew · **30 wood + 20 stone**, the same as a tower's emplacement |
 
@@ -449,8 +452,8 @@ healing.
 
 | feature | count | effect |
 |---|---:|---|
-| treasure cache | 12 | 100 gold, worked by an Excavation Camp over 10 turns |
-| freshwater spring | 1 | **3 more hands, ashore at the water**, once and for good. It was +3 to `HANDS_CAP` while a body stood on it — a rule from when hands were a number rather than named people, and one that asked a man to stand on a spring for the rest of the run to be allowed three more of him |
+| treasure cache | 12 | **50 gold**, dug by one hand in a turn. The spec gives it to an Excavation Camp over 10 turns; the camp is shelved and the hand does it |
+| freshwater spring | 1 | **2 more hands, ashore at the water**, once and for good. It was +3 to `HANDS_CAP` while a body stood on it — a rule from when hands were a number rather than named people, and one that asked a man to stand on a spring for the rest of the run to be allowed three more of him |
 | officer site | 1 | at ~0.5r, visible from turn 1; reaching it with a hand recruits a 4th officer |
 | shipwreck | 3 | 60 wood, 30 iron, 10 gold on first clear, then a buildable platform |
 
