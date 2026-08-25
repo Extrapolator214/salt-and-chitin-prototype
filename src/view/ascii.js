@@ -103,3 +103,49 @@ export function column(units) {
   const rows = [' vVv ', '(o o)', '/|X|\\', ' ^ ^ '];
   return rows.map((r) => '  ' + Array(files).fill(r).join(' ')).join('\n');
 }
+
+// ---- the sabotage mission --------------------------------------------------
+//
+// The one picture in the game that is a diagram rather than a portrait, because
+// what the mission needs explaining is its *shape*: the team walks out of the
+// ship, gathers on open ground two tiles short of the spawner, and only then
+// goes in. Every part a player can act on is on the line — the road they cut,
+// the ground they gather on, the gap they cross.
+
+export const SABOTAGE = art(`
+    ship            your road          staging        the last dash
+     ___                                  __
+    |o o|  >>>  = = = = = = = = = = >    /  \    ...>     ((( X )))
+    |___|        cut ground, walked      \__/             the charges
+                                       2 tiles out
+`);
+
+// ---- how a mission ends ------------------------------------------------------
+//
+// The one moment in a run that is worth a picture rather than a line: a spawner
+// stops existing, or a team walks home with the charges still in the bag. Two
+// silhouettes rather than one recoloured, for the same reason the two spawners
+// are drawn differently — what happened is legible before the words are read.
+
+export const SABOTAGE_DONE = art(`
+            \\   |   /
+         \\    .---.    /
+       --    .' *** '.    --
+            /  *****  \\
+       /   |  ** ! **  |   \\
+      /     \\  *****  /     \\
+             '. *** .'
+       ~~~~^^^^^-----^^^^^~~~~
+         the mound comes apart
+`);
+
+export const SABOTAGE_FAILED = art(`
+           .-~~~~~-.
+         .'  o   o  '.          \\ o /
+        /   .-----.   \\          \\|/
+       ;   /  ***  \\   ;          |
+        \\  '.-----.'  /          / \\
+         './  | |  \\.'        __/   \\__
+      ~~~~^^^^^^^^^^^~~~~
+          awake, and waiting
+`);

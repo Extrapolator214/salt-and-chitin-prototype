@@ -67,6 +67,9 @@ const ui = {
   walk: null,          // mid-stride positions, set only during a walk beat
   revealing: null,     // sites worked this turn whose pane has not played yet
   ground: null,        // ground the labour changed, held while the walk plays
+  holdSpawners: null,  // spawners killed this turn, still drawn until the box says so
+  assaultShown: false, // ...and whether that box has been shown yet this turn
+  afterAssault: null,  // what dismissing it goes on to
   // A setting rather than a per-reel control: chosen once and kept for the run.
   // `1`, `3`, or `'skip'` — which is not a speed at all but the same decision
   // made once: resolve the turn and get on with it, with nothing to watch.
@@ -268,6 +271,12 @@ function endTurn(confirmed = false) {
   // built neither is there any more.
   const before = reel.snapshotMovers(state);
   ui.pendingEvents = resolveTurn(state);
+  // A spawner that died this turn stays drawn until the mission's box opens —
+  // see `drawSpawners`. Set before the reel plays, because the reel is where
+  // the player would otherwise watch it quietly disappear.
+  ui.holdSpawners = new Set(ui.pendingEvents
+    .filter((e) => e.kind === 'spawnerDied').map((e) => e.id));
+  ui.assaultShown = false;
 
   // Skipping is the setting, not a button pressed halfway through: there is no
   // reel to build, so nothing takes the camera and nothing has to be got past.
@@ -289,6 +298,22 @@ function endTurn(confirmed = false) {
  */
 function afterReel() {
   endReel();
+
+  // The mission's own box, before the wave. It is the answer to the thing the
+  // player did on purpose, and it used to arrive after the fight it had just
+  // changed the terms of — with the mound already gone from the map, so the
+  // news was never news. Dismissing it is what lets the contact in.
+  const assault = ui.pendingEvents.find((e) => e.kind === 'assault');
+  if (assault && !ui.assaultShown) {
+    ui.assaultShown = true;
+    ui.holdSpawners = null;                  // the island changes as the box opens
+    ui.afterAssault = () => { ui.afterAssault = null; afterReel(); };
+    modals.open('assaultResult', { event: assault, more: true }, ui);
+    refresh();
+    return;
+  }
+  ui.holdSpawners = null;
+
   if (state.combat) {
     // The pace is the player's standing choice, not a decision about this
     // cohort: whoever watched the last fight at 3x is not asking to be put back
@@ -462,11 +487,12 @@ function finishTurn() {
   refresh();
 }
 
-/** The resolve's own report: the assault if there was one, else the summary. */
+/**
+ * The resolve's own report. The mission's box is not part of it any more — that
+ * one is shown before the contact, where the news is still news.
+ */
 function turnReport(events) {
-  const assault = events.find((e) => e.kind === 'assault');
-  if (assault) modals.open('assaultResult', { event: assault }, ui);
-  else modals.open('turnSummary', { events }, ui);
+  modals.open('turnSummary', { events }, ui);
   refresh();
 }
 

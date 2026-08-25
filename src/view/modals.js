@@ -16,6 +16,7 @@ import * as A from '../sim/assault.js';
 import { evolutionPartners } from '../sim/build.js';
 import {
   clearCapacity, nearestIdle, pickNearest, crewRoute, jobPlace, haulOf, haulText, walkTurns,
+  travelTurnsFor,
 } from '../sim/labour.js';
 import { outcomeText } from '../sim/turn.js';
 import { networkReaches } from '../sim/enemy.js';
@@ -151,6 +152,163 @@ const btn = (label, action, arg, disabled) =>
 
 // ---- views -----------------------------------------------------------------
 
+// ---- the guide -------------------------------------------------------------
+//
+// One tab per mechanic, in the order a run meets them. Every number on these
+// pages is read out of `C` rather than typed into the prose, because a guide
+// that quotes a constant it does not read is a guide that goes stale the first
+// time the constant moves — and half of them moved the week this was written.
+//
+// The register is deliberately flatter than the rest of the modals: short
+// sentences, "what it is" then "how you do it". The other boxes explain the
+// reasoning behind a rule to a player who already knows the rule. This one is
+// for the player who does not.
+/**
+ * What is buildable first, what is shelved after it.
+ *
+ * A list is read from the top, and a row that cannot be acted on is a row the
+ * reader has to step over. Six of the eleven yards and six of the eight guns
+ * are switched off in this build, and interleaved they turned both lists into
+ * a search. They are still listed — a shelf the player remembers and cannot
+ * find reads as a bug — but they are listed last.
+ */
+const liveFirst = (defs) => [...defs.filter((d) => !d.shelved), ...defs.filter((d) => d.shelved)];
+
+const GUIDE = [
+  {
+    id: 'run',
+    name: 'The run',
+    body: () => `
+      <p>Your ship is aground on an island that is already occupied. Destroy
+      <b>both spawners</b> to win. You lose if the hull reaches 0, or if turn
+      ${C.TURNS_PER_RUN} passes with either spawner still standing.</p>
+      <p>${C.ACTS} acts of ${C.TURNS_PER_ACT} turns. Each turn: give orders, press
+      <b>End Turn</b>, watch it play out. Orders cost nothing until the turn ends,
+      so anything you queue can be taken back.</p>
+      <p><b>How to play:</b> clear tiles, investigate points of interest, buy items
+      and craft guns, use the items and guns to build towers. Once you're defended,
+      launch sabotage missions to eliminate bug lairs.</p>`,
+  },
+  {
+    id: 'clearing',
+    name: 'Clearing',
+    body: () => `
+      <p>Only the landing beach is open. Cutting a tile takes one worker
+      ${C.TURNS_PER_TILE} turns and pays what the ground holds:
+      <b>${C.TERRAIN.forest.yield.wood} wood</b> a forest tile,
+      <b>${C.TERRAIN.stone.yield.stone} stone</b> a boulder,
+      <b>${C.TERRAIN.iron.yield.iron} iron</b> a seam. Scrub is one turn for
+      ${C.TERRAIN.scrub.yield.wood}; old canopy is ${C.turnsToClear('canopy')}.</p>
+      <p>A cut tile becomes <b>road</b>. Road is how your side travels: the crew
+      walk it, yards must stand beside it, and sabotage teams march out along it.
+      Sand, salt and meadow are walkable but can never be cut.</p>
+      <p><b>Do it:</b> click a tile on the edge of your open ground and pick who
+      cuts it. Shift-click to keep queueing. Part-cut work stays on the tile.</p>`,
+  },
+  {
+    id: 'crew',
+    name: 'Crew',
+    body: (state) => `
+      <p>You land with <b>${C.HANDS_START} hands</b> and your officers. Hands cut
+      ground, man buildings and guns, dig up what is buried, and go on missions.
+      Nothing happens without them.</p>
+      <p>More arrive by <b>flare</b>: ${costText(B.flareCost(state))} brings
+      <b>${C.FLARE_HANDS} hands</b> in ${B.flareDelay(state)} turn${B.flareDelay(state) === 1 ? '' : 's'}, with
+      ${C.FLARE_COOLDOWN} turns between boats and ${C.FLARE_GATE.join('/')} allowed by
+      act. The island pays in people too — a spring is worth
+      ${C.FEATURES.spring.hands} hands, and one castaway joins as an officer.</p>
+      <p>Officers each have one trade: the <b>Pioneer</b> cuts
+      ${C.BUILDER_TILES_PER_TURN} tiles a turn, the <b>Weapons Master</b> takes
+      ${Math.round(C.WEAPONS_MASTER_DISCOUNT * 100)}% off fittings, the <b>Gunner</b>
+      mans a tower alone for +${Math.round(C.GUNNER_POWER_BONUS * 100)}% power, and the
+      <b>Sapper Captain</b> leads missions at ${Math.round(C.SUCCESS_CAPTAIN * 100)}%.</p>
+      <p><b>Do it:</b> never end a turn with anyone idle, and fire a flare as soon
+      as you can afford one.</p>`,
+  },
+  {
+    id: 'buildings',
+    name: 'Yards',
+    body: () => `
+      <p>A yard is a fixed shape of
+      ${Math.min(...C.liveBuildings().map((b) => b.tiles))}-${Math.max(...C.liveBuildings().map((b) => b.tiles))}
+      tiles. It needs cleared ground, road beside it joined to the ship, and
+      ${C.BUILDING_GAP} tile clear of the next yard. It does nothing until it is
+      <b>manned</b> — ${C.BUILDING_HANDS} hands, or fewer where its own line says so.</p>
+      <p>The <b>Peculiar Merchant</b> sells fittings. The <b>Workshop</b> crafts them.
+      The <b>Warehouse</b> makes the hold unlimited, which is what lets you merge
+      fittings up. The <b>Powder Store</b> makes flares cheaper. The
+      <b>Sappers' Camp</b> is the only way to raise a mission.</p>
+      <p><b>Do it:</b> ${C.CREW_UPGRADE_GOLD} gold buys a yard's crew back for good.
+      A yard the swarm reaches is <b>ruined</b>, not destroyed — rebuilding is cheap.</p>`,
+  },
+  {
+    id: 'towers',
+    name: 'Guns',
+    body: () => `
+      <p>A gun is an <b>emplacement</b> (${costText(C.TOWER_COST)}) plus a
+      <b>fitting</b> from your hold. This build offers
+      ${C.liveTowers().map((x) => x.name).join(' and ')}; the rest of the shelf is
+      listed but <b>${C.SHELVED_WHY}</b>. Fittings are not interchangeable.</p>
+      <p>Iron fittings are crafted at a <b>Workshop</b> for ${C.ITEM_CRAFT_IRON} iron;
+      the rest are bought at a <b>Merchant</b> for ${C.ITEM_BUY_GOLD} gold. Two of the
+      same tier merge into one of the next, so a tier-${C.MAX_TIER} gun is
+      ${2 ** (C.MAX_TIER - 1)} tier-1 fittings — and worth
+      ${C.power(C.MAX_TIER).toFixed(0)} power against a tier-1's ${C.power(1).toFixed(0)}.</p>
+      <p>Ranges are short, so <b>where</b> a gun stands is most of what it is worth:
+      put it where the swarm will walk. One hand fires it. Guns are never attacked —
+      the swarm goes around them.</p>`,
+  },
+  {
+    id: 'gold',
+    name: 'Gold',
+    body: () => `
+      <p>Gold buys fittings, and nearly all of it is buried here:
+      <b>${C.FEATURES.cache.count} caches</b> at ${C.FEATURES.cache.gold} gold each,
+      and ${C.FEATURES.wreck.count} wrecks carrying ${C.FEATURES.wreck.wood} wood,
+      ${C.FEATURES.wreck.iron} iron and ${C.FEATURES.wreck.gold} gold apiece.</p>
+      <p>One hand works a point of interest by standing on it, and only once the
+      ground above it is open — a chest under forest is one job to cut and one to
+      dig. It pays in a single turn.</p>
+      <p><b>Do it:</b> cut toward the nearest chests first. Gold arrives before
+      anything else can.</p>`,
+  },
+  {
+    id: 'enemy',
+    name: 'The enemy',
+    body: () => `
+      <p>Two spawners sit across the island. Every ${C.ACCUMULATE_TURNS} turns each
+      sends a <b>cohort</b>, which walks to the nearest tile of your open ground and
+      follows it to your ship. Grubs are fast and many; Shells are armoured. Anything
+      that gets through takes hull: ${C.UNITS.grub.hullDamage} a grub,
+      ${C.UNITS.shell.hullDamage} a shell, out of ${C.HULL_MAX}.</p>
+      <p>Every ${C.ESCALATION_TURNS} turns a spawner gains a <b>star</b>, and each act
+      begins with ${C.ACT_ESCALATION} more. A star is ${C.UNITS_PER_STAR} more units
+      <i>and</i> tougher ones. A gun line that held last act will not hold this one.</p>
+      <p><b>Do it:</b> the fight resolves itself — you only watch. It was decided
+      before you pressed End Turn.</p>`,
+  },
+  {
+    id: 'sabotage',
+    name: 'Sabotage',
+    body: (state) => `
+      <pre class="art">${esc(art.SABOTAGE)}</pre>
+      <p>Only a <b>sabotage team</b> can destroy a spawner, and you need a manned
+      <b>Sappers' Camp</b> to raise one. The team walks out, gathers
+      <b>${C.STAGING_DISTANCE} tiles</b> from the spawner, and goes in
+      ${C.STRIKE_TURNS === 1 ? 'the next turn' : `${C.STRIKE_TURNS} turns later`}. A mission is as long as the walk, and the walk
+      is the road you cut.</p>
+      <p>Who leads decides it: the <b>Sapper Captain</b> at
+      ${Math.round(C.SUCCESS_CAPTAIN * 100)}% with a team of ${C.ASSAULT_HANDS_CAPTAIN},
+      another officer at ${Math.round(C.SUCCESS_NAMED * 100)}%, nobody at
+      ${Math.round(C.SUCCESS_GENERIC * 100)}%. Failure costs
+      ${A.downtimeTurns(state)} turns and no lives.</p>
+      <p>The <b>flanking spawner falls first</b> — the hive is not a target until
+      nothing else stands. Click the gathering tile to see the party, or call it off.</p>`,
+  },
+];
+
+const guideTab = (props) => GUIDE.find((g) => g.id === props.tab) || GUIDE[0];
+
 const VIEWS = {
   /**
    * The gunnery shelf, off the bar.
@@ -172,7 +330,7 @@ const VIEWS = {
       '. Pick one and place it on the map — the outline shows its yard and its arc, ' +
       'green where the ground will take it.</p>';
     h += '<p class="note">A fitting has one house that supplies it and no other: the ironwork — '
-      + esc(C.TOWERS.filter((d) => C.itemSource(d.i) === 'iron').map((d) => C.itemName(d.i)).join(', '))
+      + esc(C.liveTowers().filter((d) => C.itemSource(d.i) === 'iron').map((d) => C.itemName(d.i)).join(', '))
       + ' — is crafted at a <b>Workshop</b> out of iron, and the rest are bought for gold off a '
       + '<b>Peculiar Merchant</b>. Until one of those stands and is manned, no gun of that shelf can be raised.</p>';
     h += '<p class="note">A tower is built at the tier of the fitting it takes, and rises from there '
@@ -186,11 +344,12 @@ const VIEWS = {
       + `${C.CLIFF_RANGE_BONUS} further.</p>`;
     h += '<table><tr><th>tower</th><th>range</th><th>tiles</th><th>fire</th><th>fitting</th>'
       + '<th>held</th><th>builds at</th><th>cost</th><th></th><th></th></tr>';
-    for (const def of C.TOWERS) {
+    for (const def of liveFirst(C.TOWERS)) {
       // Asked without a tile, because there is no tile yet: what a row can say
       // here is whether the stores and the hold will run to it. Whether *this*
       // ground will take it is the outline's job, once one is being carried.
-      const can = O.canOrderAnywhere(state, { type: 'buildTower', towerIndex: def.i });
+      const can = def.shelved ? { ok: false, why: C.SHELVED_WHY }
+        : O.canOrderAnywhere(state, { type: 'buildTower', towerIndex: def.i });
       const held = proj.hold.filter((it) => it.tower === def.i).map((it) => it.tier).sort((a, b) => a - b);
       const takes = held[0] || 0;
       const tally = held.length
@@ -205,7 +364,7 @@ const VIEWS = {
       // standing tower rises by having a better fitting put in, so a tier-1
       // emplacement gets to the same place for less — but that is a default,
       // not a rule, and the good fitting was not previously spendable at all.
-      const buttons = tally
+      const buttons = tally && !def.shelved
         ? [...tally.keys()].sort((a, b) => a - b).map((tier) => {
           const one = O.canOrderAnywhere(state, { type: 'buildTower', towerIndex: def.i, tier });
           return btn(`Build t${tier}`, 'place', { kind: 'tower', towerIndex: def.i, tier }, !one.ok);
@@ -221,6 +380,29 @@ const VIEWS = {
       ], !can.ok, can.ok ? '' : can.why);
     }
     h += '</table>';
+
+    // The wall. Priced and placed like an emplacement, and it belongs on the
+    // same panel: what both of them buy is a decision about where the swarm
+    // walks. It is the one structure that needs no road beside it, no clearance
+    // from its neighbours and no crew at all.
+    {
+      const def = C.buildingDef('wall');
+      const up = buildingsOfType(state, 'wall').length;
+      const cost = C.buildingCost('wall');
+      const afford = O.projectedRes(state);
+      const poor = Object.entries(cost).find(([k, v]) => afford[k] < v);
+      h += '<h3>the wall</h3><table><tr><th>structure</th><th>tiles</th><th>cost</th>'
+        + '<th>effect</th><th>up</th><th></th></tr>';
+      h += row([`<b>${def.name}</b>`, def.tiles, costText(cost), def.effect,
+        up ? `${up} standing` : '—',
+        btn('Build', 'place', { kind: 'building', type: 'wall' }, !!poor)],
+      !!poor, poor ? `needs ${poor[1]} ${poor[0]}` : '');
+      h += '</table>';
+      h += '<p class="note">A wall cannot shut you in: a placement that would leave the swarm '
+        + 'no way at all to reach the hull is refused, because a fight that cannot happen is not a '
+        + 'fight you have won. What it can do is shut one lane so the other becomes the one they take.</p>';
+    }
+
     if (standing) {
       h += '<h3>standing</h3><table>';
       for (const tw of state.towers) {
@@ -253,10 +435,13 @@ const VIEWS = {
     h += `<tr><th>manning</th><td colspan="3">${m.crew.length}/${m.need}${m.gunner ? ' — the Master Gunner alone, +50% power' : ''} ${m.manned ? '' : '<span class="why">not firing</span>'}</td></tr>`;
     h += '</table>';
 
+    // The yard is at work on it. Called out rather than noted, because it is the
+    // reason every Fit button below is greyed and a reader who skims past a note
+    // is left looking at a panel that seems broken.
     if (tw.merging) {
-      h += `<p class="note">Being raised to <b>tier ${tw.merging.toTier}</b> — `
+      h += `<p class="working"><b>Being raised to tier ${tw.merging.toTier}</b> — `
         + `${tw.merging.turnsLeft} turn${tw.merging.turnsLeft === 1 ? '' : 's'} of work left. `
-        + 'It fires at the tier it has while the work goes on.</p>';
+        + 'It fires at the tier it has while the work goes on, and takes no other fitting until it is done.</p>';
     }
 
     h += `<h3>fit a ${esc(C.itemName(tw.towerIndex))}</h3>`;
@@ -386,7 +571,7 @@ const VIEWS = {
     }
     if (b.type === 'merchant') {
       const open = isBuildingManned(state, b);
-      const wares = C.TOWERS.filter((d) => C.itemSource(d.i) === 'gold').map((d) => C.itemName(d.i));
+      const wares = C.liveTowers().filter((d) => C.itemSource(d.i) === 'gold').map((d) => C.itemName(d.i));
       h += '<h3>the wares</h3>';
       h += `<p class="note">${esc(wares.join(', '))} — ${B.itemBuyCost(state)} gold apiece, and the only ` +
         `door any of them comes through. They are picked off the Inventory panel like anything else in the hold.</p>`;
@@ -414,13 +599,19 @@ const VIEWS = {
     }
     h += '</table>';
 
-    h += '<h3>crew upgrade</h3>';
-    const up = { type: 'upgradeCrew', buildingId: b.id };
-    const canUp = O.canEnqueue(state, up);
-    h += `<p class="note">${C.CREW_UPGRADE_GOLD} gold on its works, once, and it runs with <b>one hand fewer</b>. ` +
-      `It stacks with a Bunkhouse — upgraded and inside one, it wants nobody at all.</p>`;
-    h += btn(b.upgraded ? 'Upgraded' : `Upgrade (${C.CREW_UPGRADE_GOLD} gold)`, 'order', up, !canUp.ok) +
-      (canUp.ok ? '' : ` <span class="why">${esc(canUp.why)}</span>`);
+    // Not offered where there is nothing to buy. A Palisade runs on nobody by
+    // definition, so an upgrade that takes a hand off it is fifty gold for a
+    // hand it never had — and the section said as much in a greyed button and a
+    // paragraph explaining a rule that could not apply to what was on screen.
+    if ((C.buildingDef(b.type) || {}).crew !== 0) {
+      h += '<h3>crew upgrade</h3>';
+      const up = { type: 'upgradeCrew', buildingId: b.id };
+      const canUp = O.canEnqueue(state, up);
+      h += `<p class="note">${C.CREW_UPGRADE_GOLD} gold on its works, once, and it runs with <b>one hand fewer</b>. ` +
+        `It stacks with a Bunkhouse — upgraded and inside one, it wants nobody at all.</p>`;
+      h += btn(b.upgraded ? 'Upgraded' : `Upgrade (${C.CREW_UPGRADE_GOLD} gold)`, 'order', up, !canUp.ok) +
+        (canUp.ok ? '' : ` <span class="why">${esc(canUp.why)}</span>`);
+    }
 
     h += demolishSection(state, b);
     return h;
@@ -451,7 +642,7 @@ const VIEWS = {
     for (const source of ['iron', 'gold']) {
       const house = C.buildingDef(source === 'iron' ? 'workshop' : 'merchant');
       const open = hasBuilding(state, house.type);
-      const kinds = C.TOWERS.filter((d) => C.itemSource(d.i) === source);
+      const kinds = C.liveTowers().filter((d) => C.itemSource(d.i) === source);
       const price = source === 'iron'
         ? `${B.itemCraftCost(state)} iron each`
         : `${B.itemBuyCost(state)} gold each`;
@@ -574,7 +765,11 @@ const VIEWS = {
       `lane gets pulled down. Nothing is ever destroyed outright — a wrecked building is a <b>ruin</b>, doing ` +
       `nothing and holding its ground, and rebuilding one costs ${Math.round(C.RUIN_REBUILD_FRACTION * 100)}% of building it new.</p>`;
     h += '<table><tr><th>building</th><th>tiles</th><th>cost</th><th>effect</th><th>state</th><th></th><th></th></tr>';
-    for (const def of C.BUILDINGS) {
+    for (const def of liveFirst(C.BUILDINGS)) {
+      // The Palisade is on the Towers panel. It is not an economy: it is a tile
+      // of ground the enemy will not cross, which is a thing you place for the
+      // same reason and at the same moment you place a gun.
+      if (def.type === 'wall') continue;
       const built = buildingsOfType(state, def.type);
       const stateOf = (b) => (b.ruined ? 'a ruin' : isBuildingManned(state, b)
         ? (handsNeededFor(state, b) === 0 ? 'working — no crew' : 'working')
@@ -592,7 +787,14 @@ const VIEWS = {
       const already = (built.length + queued.length) > 0 && !def.repeatable;
       const cost = C.buildingCost(def.type);
       if (already) why = built.length ? 'already built' : 'already in the queue';
-      if (!already) {
+      // Shelved for this build. The row stays, greyed, with the reason on it:
+      // a yard that has simply vanished from the list reads as a bug, and a
+      // player who remembers the Forge should be told where it went.
+      if (def.shelved) {
+        why = C.SHELVED_WHY;
+        state_ = '—';
+        action = btn('Build', 'place', { kind: 'building', type: def.type }, true);
+      } else if (!already) {
         const afford = O.projectedRes(state);
         const poor = Object.entries(cost).find(([k, v]) => afford[k] < v);
         action = btn('Build', 'place', { kind: 'building', type: def.type }, !!poor);
@@ -605,7 +807,7 @@ const VIEWS = {
         extra += ' ' + btn(built.length > 1 ? `${b.name} (${b.q},${b.r})` : 'Open', 'openBuilding', { id: b.id });
       }
       h += row([`<b>${def.name}</b>`, def.tiles, costText(cost), def.effect, state_, action + extra],
-        already, why);
+        already || def.shelved, why);
     }
     return h + '</table>';
   },
@@ -668,6 +870,17 @@ const VIEWS = {
    * of the run and are written down with it, so a reload comes back cheating in
    * exactly the same way.
    */
+  guide(state, props) {
+    const tab = guideTab(props);
+    let h = '<h2>Guide</h2><div class="guide"><div class="tabs">';
+    for (const g of GUIDE) {
+      h += `<button data-x="guideTab" data-arg='${esc(JSON.stringify({ tab: g.id }))}'`
+        + `${g.id === tab.id ? ' class="on"' : ''}>${esc(g.name)}</button>`;
+    }
+    h += '</div><div class="pane">' + tab.body(state) + '</div></div>';
+    return h;
+  },
+
   dev(state) {
     let h = '<h2>Dev menu</h2>';
     h += '<p class="note">Cheats. They take effect at once, they are written into the saved run, '
@@ -712,14 +925,21 @@ const VIEWS = {
     const turning = nextAct > C.actOf(turn) ? nextAct : 0;
     const roman = (n) => 'I'.repeat(n);
 
+    // Plainly, and in the terms the player is about to act in. "N flares are
+    // allowed from here, cumulative" is the gate as the constant states it and
+    // asks the reader to subtract; what they want to know is how many more
+    // boats they may call, so that is the number shown.
+    const moreFlares = turning > 1
+      ? C.FLARE_GATE[turning - 1] - C.FLARE_GATE[turning - 2]
+      : C.FLARE_GATE[0];
     let h = turning
-      ? `<h2>Act ${roman(turning)}</h2><p class="why">The island turns over. `
-        + `${C.FLARE_GATE[turning - 1]} flares are allowed from here, cumulative.</p>`
+      ? `<h2>Act ${roman(turning)}</h2><p class="why">The island evolves. `
+        + `<b>${moreFlares}</b> additional flare${moreFlares === 1 ? ' is' : 's are'} available.</p>`
       // Reachable only if something opens this box off an ordinary star; the
       // resolve does not, but the heading should still be true if it did.
       : '<h2>The enemy grows</h2>';
 
-    h += '<table><tr><th>spawner</th><th>stars</th><th>its cohorts</th><th>every unit</th><th></th></tr>';
+    h += '<table><tr><th>spawner</th><th>stars</th><th>cohort size</th><th>each unit</th><th></th></tr>';
     for (const e of stars) {
       const sp = state.spawners.find((x) => x.id === e.id);
       const was = e.stars - 1;
@@ -733,14 +953,14 @@ const VIEWS = {
         '',
       ]);
       const notes = [];
-      notes.push('its next cohort carries an <b>elite</b>');
-      if (pairs > 0) notes.push(`<b>${pairs}</b> shield-and-healer pair${pairs === 1 ? '' : 's'} in every wave`);
+      notes.push('next cohort carries an <b>elite</b>');
+      if (pairs > 0) notes.push(`<b>${pairs}</b> shield and healer pair${pairs === 1 ? '' : 's'} every wave`);
       h += `<tr><td></td><td colspan="4"><span class="note">${notes.join(' · ')}</span></td></tr>`;
     }
     h += '</table>';
-    h += `<p class="note">A star is more of them and bigger ones: numbers climb by `
-      + `${C.UNITS_PER_STAR} a star, hp and armour by the square of it. Killing a spawner does not `
-      + `spare you its stars — they pass to whatever is left standing.</p>`;
+    h += `<p class="note">Each star adds <b>${C.UNITS_PER_STAR}</b> units to a cohort and makes `
+      + `every unit tougher. Killing a spawner does not remove its stars — they pass to the one `
+      + `left standing.</p>`;
     // With the reel off there is no report behind this one to hand over to, so
     // the button says what it does.
     h += `<p>${report ? btn('Go on', 'afterEscalation', {}) : btn('Close', 'close')}</p>`;
@@ -794,13 +1014,19 @@ const VIEWS = {
   },
 
   assault(state) {
-    let h = `<h2>Bug Sabotage mission</h2><p class="note">A spawner can only be destroyed by a sabotage team. ` +
-      `${C.ASSAULT_HANDS} hands, ${C.MARCH_TURNS} turns out. Nobody dies; failure costs ${A.downtimeTurns(state)} turns of downtime. ` +
-      `Who leads it is the whole of it: the Sapper Captain goes at ${Math.round(C.SUCCESS_CAPTAIN * 100)}% with a team of ` +
-      `${C.ASSAULT_HANDS_CAPTAIN}, another lieutenant at ${Math.round(C.SUCCESS_NAMED * 100)}%, and a team with nobody over it ` +
-      `at ${Math.round(C.SUCCESS_GENERIC * 100)}%.</p>`;
-    h += '<table><tr><th>target</th><th>road path</th><th>leader</th><th>success</th><th>team</th><th></th><th></th></tr>';
+    let h = `<h2>Bug Sabotage mission</h2>`;
+    h += `<pre class="art">${esc(art.SABOTAGE)}</pre>`;
+    h += `<p class="note">A spawner can only be destroyed by a sabotage team, and the team goes on foot. ` +
+      `They gather on open ground <b>${C.STAGING_DISTANCE} tiles</b> from the spawner and go in ` +
+      `${C.STRIKE_TURNS} turn${C.STRIKE_TURNS === 1 ? '' : 's'} later — so a mission takes exactly as long as ` +
+      `the walk, and the walk is the road you cut. Nobody dies; failure costs ${A.downtimeTurns(state)} turns of downtime.</p>`;
+    h += `<p class="note">Who leads it is the whole of it: the Sapper Captain goes at ` +
+      `${Math.round(C.SUCCESS_CAPTAIN * 100)}% with a team of ${C.ASSAULT_HANDS_CAPTAIN}, another lieutenant at ` +
+      `${Math.round(C.SUCCESS_NAMED * 100)}%, and a team with nobody over it at ` +
+      `${Math.round(C.SUCCESS_GENERIC * 100)}%.</p>`;
+    h += '<table><tr><th>target</th><th>staging ground</th><th>leader</th><th>success</th><th>team</th><th></th><th></th></tr>';
     for (const sp of state.spawners.filter((x) => x.alive)) {
+      const staging = A.stagingTile(state, sp);
       for (const leader of [null, ...state.crew.officers.map((o) => o.id)]) {
         const order = { type: 'scheduleAssault', spawnerId: sp.id, leader };
         const can = O.canEnqueue(state, order);
@@ -808,7 +1034,8 @@ const VIEWS = {
         // The team is quoted per row, not once above the table: the Captain
         // brings it down to two, and only on the row where he is the one going.
         const hands = A.assaultHands(state, leader) - (leader ? 1 : 0);
-        h += row([`${sp.name} (${sp.q}, ${sp.r})`, roadWord(state, sp), name,
+        h += row([`${sp.name} (${sp.q}, ${sp.r})`,
+          staging ? `(${staging.q}, ${staging.r})` : 'no way to it yet', name,
           `${Math.round(A.successChance(state, leader) * 100)}%`,
           `${hands} hand${hands === 1 ? '' : 's'}${leader ? ' + him' : ''}`,
           btn('Send', 'orderClose', order, !can.ok)],
@@ -817,7 +1044,11 @@ const VIEWS = {
     }
     for (const a of state.assaults) {
       const sp = state.spawners.find((x) => x.id === a.targetSpawnerId);
-      h += row([`under way -> ${sp ? sp.name : '?'}`, a.state, a.leader || 'nobody', `${a.turnsRemaining} turns left`, '']);
+      const where = a.staging ? `(${a.staging.q}, ${a.staging.r})` : '';
+      const state_ = a.state === 'gather' ? `walking to ${where}`
+        : a.state === 'strike' ? `going in — ${a.turnsRemaining} turn${a.turnsRemaining === 1 ? '' : 's'}`
+        : `${a.state} — ${a.turnsRemaining} turn${a.turnsRemaining === 1 ? '' : 's'} left`;
+      h += row([`under way -> ${sp ? sp.name : '?'}`, where, a.leader || 'nobody', state_, '']);
     }
     return h + '</table>';
   },
@@ -845,6 +1076,66 @@ const VIEWS = {
     // so the tile reads as bare road and used to say "nothing to do here" —
     // with the yard outlined on it and its order in the panel beside it. Taking
     // it back is the whole reason to click a plot you have placed.
+    // The staging ground of a mission under way. First, because it is the one
+    // thing on this tile that is a decision the player can still take back: the
+    // team is standing here or walking here, and calling it off is four bodies
+    // handed back to the frontier.
+    // Ordered but not yet away: the ground is chosen, the team is not. Its
+    // Cancel is the order's own — revoking it is how a queued thing is undone
+    // everywhere else in the game.
+    const planned = A.plannedStagingAt(state, q, r);
+    if (planned) {
+      h += '<h3>bug sabotage mission</h3>';
+      h += '<p class="why">The assault party will gather here when the turn ends.</p>';
+      const held = O.crewGroundAtResolve(state);
+      const { teams } = O.projectedCrew(state, held);
+      const team = (teams.get(planned.order.id) || {}).team || [];
+      h += '<table>';
+      h += row(['target', `<b>${esc(planned.spawner.name)}</b>`, '', '',
+        btn('Cancel', 'revoke', { id: planned.order.id })]);
+      h += row(['party', `${team.length} setting out`, '', '', '']);
+      // Who goes and how long each of them is on the road. They set out from
+      // wherever they are standing, so a mission is as ready as its slowest
+      // walker — which is a thing worth seeing before the turn is ended, not
+      // after.
+      for (const who of team) {
+        const m = memberById(state, who);
+        const turns = travelTurnsFor(state, who, planned.staging, held);
+        const when = !m ? '—'
+          : m.q === q && m.r === r ? 'already here'
+            : !Number.isFinite(turns) ? 'no way there'
+              : turns === 0 ? 'arrives next turn'
+                : `${distance(m, { q, r })} tiles off — arrives in ${turns + 1} turns`;
+        h += row(['', esc(crewName(state, who)), when, '', '']);
+      }
+      h += '</table>';
+    }
+
+    const mission = A.assaultStagingAt(state, q, r);
+    if (mission) {
+      const sp = state.spawners.find((x) => x.id === mission.targetSpawnerId);
+      const team = A.assaultTeam(state, mission);
+      const here = team.filter((who) => {
+        const m = memberById(state, who);
+        return m && m.q === q && m.r === r;
+      });
+      const going = mission.state !== 'gather';
+      h += '<h3>bug sabotage mission</h3>';
+      h += `<p class="why">${going
+        ? 'The charges are going in.'
+        : 'The assault party is gathering.'}</p>`;
+      h += '<table>';
+      h += row(['target', `<b>${esc(sp ? sp.name : 'the spawner')}</b>`, '', '', '']);
+      h += row(['party', `${here.length} of ${team.length} in position`, '', '',
+        going ? '' : btn('Cancel', 'cancelAssault', { id: mission.id })]);
+      for (const who of team) {
+        const m = memberById(state, who);
+        const at = m && m.q === q && m.r === r ? 'here' : m ? `on the way — ${distance(m, { q, r })} tiles off` : '—';
+        h += row(['', esc(crewName(state, who)), at, '', '']);
+      }
+      h += '</table>';
+    }
+
     const plots = O.queuedStructuresAt(state, { q, r });
     if (plots.length) {
       h += '<h3>queued here</h3><table>';
@@ -855,7 +1146,9 @@ const VIEWS = {
       h += '</table>';
     }
 
-    const already = O.workersOn(state, { q, r });
+    // Anyone the mission block above has already named is not listed again —
+    // and could not be stood down on their own anyway. Its Cancel is the row.
+    const already = O.workersOn(state, { q, r }).filter((a) => !(mission && a.kind === 'assault'));
     if (already.length) {
       h += '<h3>already spoken for</h3><table>';
       for (const a of already) {
@@ -963,9 +1256,19 @@ const VIEWS = {
     return h;
   },
 
-  assaultResult(state, { event }) {
+  /**
+   * How the mission went — shown before the wave that is already on its way in.
+   *
+   * It waits to be dismissed, and the map waits with it: a spawner killed this
+   * turn is still standing behind this box, and comes off the island as the box
+   * opens. The alternative was what the build used to do — the mound vanished
+   * during the walk, and the news arrived after the fight, about something the
+   * player had already worked out from an empty patch of map.
+   */
+  assaultResult(state, { event, more = false }) {
     const e = event;
     let h = `<h2>Bug Sabotage mission — ${e.result}</h2>`;
+    h += `<pre class="art">${esc(e.result === 'success' ? art.SABOTAGE_DONE : art.SABOTAGE_FAILED)}</pre>`;
     const narration = e.result === 'success'
       ? [`The team reaches the ${e.target} in the dark.`,
         'Charges go in under the mound; the ground lifts and settles.',
@@ -975,6 +1278,8 @@ const VIEWS = {
         `Nobody dies. They are unfit for ${e.downtime} turns.`];
     h += narration.map((n) => `<p>${esc(n)}</p>`).join('');
     h += `<p class="note">led by ${e.leader || 'nobody'} — ${Math.round(e.chance * 100)}% chance</p>`;
+    // `more` is set when a cohort is standing on the road behind this box.
+    h += `<p>${more ? btn('Go on', 'afterAssault', {}) : btn('Close', 'close')}</p>`;
     return h;
   },
 
@@ -1321,6 +1626,11 @@ export function summarise(events) {
 
 const ACTIONS = {
   openBuilding(state, payload, ui) { open('building', { id: payload.id }, ui); },
+  // The guide's tabs are one modal with a page in its props, not eight modals.
+  guideTab(state, payload, ui) { current.props.tab = payload.tab; ui.refresh(); },
+  // Instant, like standing a worker down: it is not an order about next turn,
+  // it is the player taking four bodies back.
+  cancelAssault(state, payload, ui) { A.cancel(state, payload.id); close(ui); },
   openTrade(state, payload, ui) { open('trade', {}, ui); },
   openInventory(state, payload, ui) { open('inventory', {}, ui); },
   // The counter, in three parts: fill the box, stage what was asked for, and
@@ -1408,9 +1718,16 @@ const ACTIONS = {
   // turn that could disagree.
   afterEscalation(state, payload, ui) {
     const events = (current && current.props && current.props.events) || [];
-    const assault = events.find((e) => e.kind === 'assault');
-    if (assault) open('assaultResult', { event: assault }, ui);
-    else open('turnSummary', { events }, ui);
+    // The mission's own box is shown before the contact now, not after the act
+    // turns, so what follows a star is the turn's summary and nothing else.
+    open('turnSummary', { events }, ui);
+  },
+  // Dismissing the mission's box is what lets the wave in: the contact was held
+  // behind it so the news arrives before the fight rather than after it.
+  afterAssault(state, payload, ui) {
+    current = null;
+    if (ui.afterAssault) ui.afterAssault();
+    else ui.refresh();
   },
   endTurn(state, payload, ui) { current = null; ui.endTurn(); },
   // The one setting the player can reach from inside a box that has interrupted

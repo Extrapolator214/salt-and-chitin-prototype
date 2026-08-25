@@ -86,13 +86,23 @@ export function resolveTurn(state) {
   landFlares(state, events);                                   // 5
   tickAssaults(state, events);                                 // 6
   if (state.turn % C.ESCALATION_TURNS === 0) escalate(state, events); // 7
+  // An act does not merely begin — it arrives. The regular star lands on the
+  // clock; the turn that ends an act puts `ACT_ESCALATION` more on top of it,
+  // so what the player meets on the first turn of act 2 is a different enemy
+  // rather than the same one a little later. The stars are dealt one at a time
+  // by the same rule as the clock's, which is what keeps them spread across the
+  // two spawners instead of all landing on the hive.
+  if (C.actOf(state.turn + 1) > C.actOf(state.turn)) {
+    for (let i = 0; i < C.ACT_ESCALATION; i++) escalate(state, events);
+  }
   runSpawners(state, events);                                  // 8
   const contacts = advanceCohorts(state, events);               // 9
 
   state.stats.peakPower = Math.max(state.stats.peakPower, totalPower(state));
 
-  if (contacts.length) {
-    beginCombat(state, contacts, events);
+  // `beginCombat` answers null when not one of the contacts can find a way to
+  // the hull; there is then no resolve to play and no damage to take.
+  if (contacts.length && beginCombat(state, contacts, events)) {
     events.combat = true;
   }
   return events;

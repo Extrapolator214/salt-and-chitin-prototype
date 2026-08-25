@@ -77,7 +77,8 @@ is visible at all.
 | hover | the tile panel |
 | left-click | the tile's own modal — points of interest first, then what can be cut there |
 | Restart map | the same island again from turn 1; **New run** is a different island |
-| Towers / Economy in the bar | pick a gun or a yard; its outline then follows the cursor and a click puts it down |
+| Guide in the top bar | one page per mechanic, in the order a run meets them — what it is and how to do it |
+| Towers / Economy in the bar | pick a gun or a yard; its outline then follows the cursor and a click puts it down. The **Palisade** is on Towers: what it buys is a decision about where the swarm walks, which is a gun's question, not an economy's |
 | shift-click | put the nearest idle hand on the tile: cut it, or work what the cutting uncovered |
 | right-click | the same as shift-click |
 | drag | pan |
@@ -94,15 +95,26 @@ It plays through the same order queue a human uses and tries to win.
 
 ```
 node tests/play.mjs --seeds 12          # win rate over 12 seeds
+node tests/play.mjs --compare           # every strategy over the same seeds
 node tests/play.mjs --trace 20260816    # turn-by-turn journal for one seed
 node tests/play.mjs --sweep --seeds 5   # sweep the road-vs-guns trade-off
+node tests/play.mjs --seeds 12 --jobs 1 # one seed at a time, the old way
 ```
 
-Its best line wins **2 of 6 seeds**, on turns 178 and 256: rush a road at the
-nearer spawner from turn 20, keep six hands on the road face, hold **five guns
-of two kinds** — the minor pair fed to an evolution — and buy the building crews
-back at 50 gold a time.
-See "What the simulations found" below.
+Seeds are played side by side in child processes, one per core less two, so the
+twelve-seed figure below is two minutes rather than ten. `--jobs N` sets the
+width; `--trace` and `--sweep` are always serial.
+
+Its reference line wins **3 of 12 seeds** on the hour-long clock, on turns
+52-56, and kills at least one spawner on nine of the twelve: dig the chests
+first, buy the gun line off the **Peculiar Merchant** rather than making it,
+take the **Warehouse before the guns** so sixteen tier-1 fittings can become one
+tier-5 in a turn, quarry stone the moment a yard on the list wants it, and send
+the **Sapper Captain** with the charges. See "What the simulations found" below.
+
+On the old 300-turn frame the same policy won 9 of 12. The rebalance to an
+hour-long session — a third of the clock, a third of the island, a crew of three
+that grows a boat at a time — put it back inside the design's 25-40% band.
 
 The harness is a diagnostic, not a benchmark — every rule change since it was
 written has cost it win rate until it was re-tuned for the new rule, which is
@@ -117,7 +129,7 @@ It imports `sim/` only and is a development harness, not part of the game.
 node tests/acceptance.mjs        # all of it, ~80 seconds
 node tests/acceptance.mjs 3.4    # one section
 node tests/view.mjs              # the view, against a stub canvas, ~1 second
-node tests/play.mjs              # the reference policy over 6 seeds, ~5 minutes
+node tests/play.mjs              # the reference policy over 6 seeds, ~1 minute
 ```
 
 A section that throws inside its own fixtures is reported as one failure rather
@@ -131,6 +143,92 @@ through every branch that decides what is drawn and asserts only that the
 drawing happens. `tests/play.mjs` exits non-zero if the reference policy wins
 nothing at all (`--min N` for a stricter bar); it used to exit 0 whatever
 happened, so a change that made the game unwinnable was invisible.
+
+## The hour-long rebalance
+
+A won run took 120 turns of a 300-turn frame and about ninety minutes at the
+table. The target is an hour, so the whole clock is cut to a third and the
+island with it:
+
+| | was | now |
+|---|---|---|
+| run | 300 turns, 3 acts of 100 | **99 turns, 3 acts of 33** |
+| escalation | a star every 25 turns | **a star every 11, plus 2 the turn an act opens** |
+| island | radius 36, ~3800 land tiles | **radius 12, ~420 land tiles** |
+| crew | 10 hands ashore, 5 a boat | **3 hands ashore, 3 a boat** |
+| tile yields | forest 9 wood, boulder 15 stone | **27 wood, 45 stone** |
+| a sabotage mission | 32 turns, wherever you stood | **the walk out and one turn** |
+| unit speed | grub 1.2, shell 0.6 tiles/s | **0.4 and 0.32** — closer together, not just slower |
+| a cohort's shape | single file, grubs then shells | **2 abreast, ranks 0.35 apart, the kinds mixed** |
+
+The last two are the ones worth explaining, because neither is a number the
+designer asked for and both fall straight out of the ones that were.
+
+**A mission is a walk.** Two spawners at 32 turns apiece is two thirds of a
+99-turn run spent watching a counter, so the counter is gone: the team gathers
+on open ground two tiles from the spawner and goes in a turn later. What decides
+a mission's length is now the road you cut to it — which is a thing on the map,
+which is a thing you can plan. The **hive is last**: it is not a legal target
+until the flank has fallen.
+
+Because the ground it gathers on is ground the player never chose, the mission
+is drawn like any other job. The staging tile is ringed and every body walking
+to it is joined to it by a line, exactly as a queued clear joins a worker to his
+face — dashed and dim while the order is still in the queue, solid once the team
+is away. The tile itself says who is going and how many turns each of them is
+from it (they set out from where they stand, so a mission is as ready as its
+slowest walker), and carries the one decision left: **Cancel**. Standing a
+single member down calls the whole mission off rather than leaving a team that
+can never be all present.
+
+**Units walk at a third of the pace.** What a gun is worth is the time its arc
+holds a unit, and that is the walk divided by the speed. Cut the walk to a third
+and leave the speed alone and every gun loses two thirds of its shots — which
+is exactly what the harness measured: a maxed six-gun line at 234 power dying to
+act 2. A resolve therefore still takes about as many seconds as it used to; what
+got shorter is the number of turns in a run, not the length of a fight.
+`RESOLVE_CAP_SECONDS` went 60 → **600** with it, because at 60 a cohort walking
+in along a long road ran out of clock and evaporated — a wave the player never
+had to fight, and a reason to build the longest road you could. It is a backstop
+now rather than a limit: a real fight on this island is 20-40 seconds.
+
+**A cohort arrives as a crowd, and it arrives mixed.** Two things were wrong
+with the old column and they compounded. `pos` was `-index * 0.45` — single
+file, so 72 units were a queue 32 tiles long that trickled past the guns one at
+a time; and `buildUnits` laid every grub down before every shell, so the order
+they came on sent the wave in as two waves. The fast half arrived, was fought
+and died, and the armoured half turned up afterwards against a gun line that had
+already spent its shots on the wrong problem — which is not the wave the design
+describes, where a cohort is a rate-of-fire problem *and* a penetration problem
+at once.
+
+Now they come **two abreast**, a rank every 0.35 tiles with a little slop on
+each, and the two kinds are spread evenly through the column by largest
+remainder — so a rank out of the shell spawner is a grub beside a shell.
+
+Interleaving the list was not enough on its own, and the reason is worth
+writing down: a Shell at half a Grub's speed **re-sorts the column on the way
+in**. Over a nine-tile road the grubs arrived between 23 and 38 seconds and the
+shells between 49 and 71, so however they set off, the fight was two fights. A
+head start would have fixed the arithmetic and broken the game — a unit that
+starts four tiles up the road is a unit four tiles of guns never shot at — so
+the speeds came together instead: a Shell walks at **80%** of a Grub rather than
+50%, and the elite's multiplier went 0.5 → 0.8 with it. The same cohort now
+lands 23-38 and 31-45. What makes a Shell a Shell is its armour, not its pace. What
+that changes is what a wave *is*: the guns are overlapped rather than fed, and
+whether the line holds is settled in seconds instead of by attrition. It is the
+biggest difficulty lever touched so far — the reference policy went 4/12 to
+1/12 at three abreast and sits at **3/12** at two, and an undefended ship's
+death moved from the low 60s to the low 40s.
+
+**What is switched off.** Six yards (Forge, Trading Dock, Tinker's Shed,
+Hospital, Excavation Camp, Bunkhouse) and six of the eight gun kinds are
+shelved: they are listed everywhere they always were and every one of them says
+*unavailable in this version*. What is left is one gun line of two kinds — the
+Swivel Gun Post out of the Workshop and the Parrot Swarm Aviary off the Peculiar
+Merchant — with the Warehouse, the Powder Store, the Sappers' Camp and the
+Palisade behind them. `allContent` in the dev menu turns the whole shelf back
+on, and the acceptance suite runs with it on.
 
 ## Where the build departs from the spec
 
@@ -1465,48 +1563,86 @@ fail.
 
 ## What the simulations found
 
-Six full 300-turn runs with the AI player, on the current numbers:
+Twelve full 300-turn runs with the AI player, on the current numbers:
 
 | | |
 |---|---|
-| win rate | **2 / 6** — both spawners dead |
-| winning turns | 178 and 256 |
-| losing turns | 115–232, **all four `lost:hull`** — the ship is broken open, not out-waited |
+| win rate | **3 / 12** — both spawners dead |
+| winning turns | 52-56 of 99 |
+| losing turns | 56-99; one spawner dead in nine of the twelve runs |
 
-That sits inside the design's stated 25–40% campaign band. It did not always:
-the table here used to read 10 of 12 on turns 51–113, with both losses turtled
-to turn 300 with the hull intact. That was measured before the island grew from
-radius 32 to 36, before footprints doubled, before the crew had to walk their
-own ground rather than the straight line, and before the labour officer's batch
-was restricted to one kind of terrain. Every one of those changes cost the
-reference policy seeds, and the losing mode changed with them: nothing turtles
-now, because a policy that does not get out and kill something is broken open
-long before turn 300.
+That sits inside the design's stated 25-40% band, and two of the losses are a
+spawner-kill and a hull break on the same turn — the run's own tiebreak checks
+the hull first. On the 300-turn frame this policy won 9 of 12; the hour-long
+clock is genuinely harder, because the enemy's escalation was cut to a third
+along with everything else while the player's *bills* were not.
 
-The one number the sweep still cares about is **`maxTowers`**, now **5**, with
-`mateShare: 2` — five towers of two kinds, the two of the minor kind fed to an
-evolution. It was 2 when the gun line was cheaper and the waves were thinner;
-act 3 cannot be held by two guns.
+What the policy learned along the way, in descending order of what it was worth:
 
-Three findings worth the designer's attention:
+**1 · Do not wall your own ship in.** The ship's network is open ground joined
+to the ship and does not care what is standing on it, so a road with a gun on it
+is still an entry. The resolve asks a stricter question — `isPassable(..,
+'assault')`, which a tower's tile and a yard's tile both fail — and when it
+cannot find a walk, `beginCombat` falls back to a path *one tile long*. A cohort
+on a one-tile path is already at the end of its walk: it arrives at the hull the
+instant the resolve opens, having passed nothing that could shoot at it. Four
+guns and five yards ringing the landing sealed every approach, and from then on
+every wave took a hundred hull in one resolve, unopposed — half the seeds died
+that way, at turn 35-60, with the guns silent. **This is a bug in the build, not
+a rule**, and it is listed under "Known calibration problems" below; the policy
+now checks that a placement leaves the swarm a lane in (`keepsLaneOpen`), which
+is a thing a player has to know too.
 
-**1 · Hands never grow, and it does not matter.** A Forge ordered on turn 17
-and manned all run produces **136 iron in 300 turns** — one flare, on turn 144.
-Six flares want 240. So the crew goes 10 → 15 late, never 15 → 25 → 40, and the
-act structure never happens. But cutting the flare's iron cost to 40, which
-makes three flares reachable, changed the win rate **not at all** (5/12 either
-way): the rush wins before the crew economy matters. The iron price does not
-block winning — it blocks the game the acts describe. That cut is now the
-shipped value; the bullet under "Known calibration problems" that still called
-it 120 has been corrected.
+**2 · The gold shelf beats the better gun.** The Culverin Battery's range-4 arc
+is the widest on the shelf and the line was built on it for a year. Its fitting
+is six iron, and iron comes a tile at a time, so the arc arrives in act 2 and
+the waves do not wait. A Parrot Cage is 8 gold off the Peculiar Merchant, a
+chest is 220 gold for one hand's turn, and there are twelve chests — so sixteen
+cages is one chest and a half, and that is a tier-5 gun by turn 40. Reference
+line 5/6, the same policy on Culverins 1/6.
 
-**2 · A smaller island is harder, not easier.** Dropping `ISLAND_RADIUS` from 33
+**3 · Five hold slots is a merge limit, not a stockpile limit.** Two fittings of
+a tier make one of the next, so a tier-5 is sixteen tier-1s, and sixteen do not
+fit in five slots. The hold used to jam solid at four odd tiers with no legal
+merge and no room to buy the pair that would unjam it. The Warehouse is
+therefore not a late luxury — taken **before the first gun**, the whole ladder
+is one turn's work.
+
+**4 · The Sapper Captain is worth about forty turns.** 90% where another
+lieutenant is 65% and nobody at all is 40%, over a 32-turn march, and a team of
+two hands rather than four. The policy used to send the Weapons Master because
+his discount goes on working while he is away. Putting the Captain first was
+worth a seed on its own.
+
+**5 · Stone is the binding constraint and nothing signals it.** A Sappers' Camp
+is 380 wood and 260 stone; the frontier pays 9 wood a forest tile and 15 stone a
+boulder, and the nearest-face rule cuts wood. The policy sat on two thousand
+wood and eleven stone with the camp — the only door to a win — unaffordable at
+turn 85, on six seeds out of six. It now quarries deliberately when the next
+yard on the list wants stone.
+
+**6 · The Trading Dock is a different game.** Its counter sells 12 stone for 2
+gold and iron at 2 gold a bar, so one dug chest pays for every yard on the
+shelf. Pointed at it deliberately (`--strategy dock`) the same policy still wins
+5/6 but **thirty turns sooner**, with the stone problem above simply deleted.
+The counter's prices are the loosest numbers in the build; the reference line
+does not use them, so the win rate above is not measuring them.
+
+**7 · Hands never grow, and it does not matter.** A Forge ordered on turn 17 and
+manned all run produces **136 iron in 300 turns** — one flare, on turn 144. Six
+flares want 240. Cutting the flare's iron cost to 40 (now shipped) changed the
+win rate not at all: the seams on the map are faster than the smelter, and the
+reference line does not build a Forge. The crew goes 10 → 25-40 on chest gold
+and the odd seam, and the act structure the flare economy describes never
+happens.
+
+**8 · A smaller island is harder, not easier.** Dropping `ISLAND_RADIUS` from 33
 to 28 halved the win rate, 5/12 → 2/12 (measured when the radius was 33; it is
-36 now, for this reason). The shorter road helps the enemy as
-much as the player, and the smaller island earns less. Island size is not a
-difficulty dial in the direction you would guess.
+36 now, for this reason). The shorter road helps the enemy as much as the
+player, and the smaller island earns less. Island size is not a difficulty dial
+in the direction you would guess.
 
-**3 · Sand and salt are permanent walls to a road, but not to a worker.**
+**9 · Sand and salt are permanent walls to a road, but not to a worker.**
 Neither can ever be cleared, so neither can ever become road. Your crew walk
 both freely — that is what `WORK_OPEN_TERRAIN` says — so a beach is a highway
 for labour and a dead end for a supply line at the same time. A flat lying
@@ -1514,6 +1650,32 @@ across the approach to a spawner cannot be bridged or dug and forces a detour,
 and since a sabotage mission needs a *continuous* road, it can rule out a whole
 bearing. This is emergent rather than stated, and it is a good property, but
 nothing in the UI tells the player why their road will not connect.
+
+**10 · The Excavation Camp is dead content, confirmed by the sweep.** A hand
+digs a cache in one turn for the same 220 gold the camp takes ten turns and a
+crew to pay. The reference line's `camps` knob is **0**, and the camps it used
+to build were costing it the early game.
+
+### The five ways to play, over the same six seeds
+
+`node tests/play.mjs --compare`. Each of these takes one lever of the reference
+policy and leans on it, which is the point: what they measure is not whether a
+lever is good but whether the game rewards specialising in it.
+
+| strategy | wins | spawners | mean win turn | what it changes |
+|---|---|---|---|---|
+| `optimal` | 5/6 | 11/12 | 198 | the reference line |
+| `dock` | 5/6 | 11/12 | 164 | the counter, i.e. the broken prices |
+| `frontier` | 5/6 | 11/12 | 188 | no chest-first rule; cut the nearest face |
+| `flare` | 4/6 | 10/12 | 210 | never spend wood the next boat needs |
+| `culverin` | 1/6 | 7/12 | 153 | the old range-4 iron line, five guns |
+| `tiers` | 0/6 | 4/12 | — | two guns only, evolution early |
+
+`tiers` at 0/6 is the sharpest of these: act 3 cannot be held by two guns
+however high they are tiered, and an evolution at 97.7 power does not cover the
+arc that four tier-5s do. `frontier` scoring level with `optimal` says the
+chest-first rule is worth tempo rather than runs — the gold arrives either way,
+because the frontier walks over the chests in the end.
 
 ### Known calibration problems, not yet fixed
 
@@ -1526,6 +1688,21 @@ nothing in the UI tells the player why their road will not connect.
 - **The Forge and Trading Dock have no throttle.** Once manned they consume
   3 stone and 12 wood-or-stone every turn, for ever. Building a Dock early
   drains a run.
+- ~~**A cohort with no walk to the hull hits the hull anyway.**~~ **Fixed.** It
+  used to fall back to `path = [entry]`, a path already at its end: every unit
+  arrived on the hull the instant the resolve opened, out of range of every gun,
+  and a ship walled into its own cove lost a hundred hull a wave to something
+  nobody ever got a shot at. Three changes settle it. `cohortTarget` prefers an
+  entry the swarm can actually charge from — `chargeable`, the assault-phase
+  flood out of the ship — so a wall *redirects* them instead of breaking the
+  resolve; `beginCombat` makes no contact at all where there is genuinely no way
+  in; and `canBuildBuilding` / `canBuildTower` refuse a placement that would
+  shut the last way in, so the state cannot be built into in the first place. A
+  fight that cannot happen is not a fight you have won.
+- **The Trading Dock's counter is priced like a gift.** 12 stone for 2 gold and
+  1 iron for 2 gold, against a chest at 220 gold, means one dug chest buys every
+  yard on the shelf twice over. See finding 6 above for what it is worth in win
+  rate.
 
 ## Conventions
 

@@ -312,3 +312,29 @@ kbd { color: var(--dim); font-size: 11px; }
 .reel-col .bar { color: var(--bad); letter-spacing: .12em; }
 
 
+
+/* The guide: tabs down the left, one page to the right of them. A column
+   rather than a row because there are eight of them and their names are words
+   — a row of eight words wraps into a paragraph of buttons at any width the
+   modal is likely to be. */
+.guide { display: flex; gap: 14px; align-items: flex-start; }
+.guide .tabs { display: flex; flex-direction: column; gap: 2px; flex: 0 0 120px; }
+.guide .tabs button { text-align: left; padding: 3px 8px; }
+.guide .tabs button.on { background: #2f3742; color: #fff; }
+.guide .pane { flex: 1 1 auto; min-width: 0; }
+.guide .pane p { margin: 0 0 9px; line-height: 1.5; }
+.guide .pane p:last-child { margin-bottom: 0; }
+/* The one page with a picture on it; the art is wider than the pane is at the
+   narrow end, and a diagram that wraps is not a diagram. */
+.guide .pane pre.art { overflow-x: auto; margin: 0 0 10px; }
+
+/* A structure part way through work of its own — a gun having a better fitting
+   worked in, say. It is not a refusal and not a note: it is the state the panel
+   below it is in, and the reason half of that panel is greyed. */
+#modal .working {
+  margin: 8px 0;
+  padding: 5px 9px;
+  border-left: 2px solid var(--warn);
+  background: #23262c;
+  color: var(--warn);
+}

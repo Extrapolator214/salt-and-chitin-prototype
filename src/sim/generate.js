@@ -488,7 +488,11 @@ function attempt(seed, attemptNo) {
 
   // fresh water: streams draining from a hub inland of the landing out to the coast
   const freshHub = atBearing(base, inlandBearing, C.STRUCTURE_KEEPOUT + 1);
-  const spokeCount = intRange(rng, 3, 4);
+  // Two or three, not three or four. A spoke is a stream running out of the hub
+  // to the coast, and on a 12-tile island four of them quarter it — the wedge
+  // test below (the two spawners must not share one) then fails over and over,
+  // and generation was spending a third of its rejections here.
+  const spokeCount = intRange(rng, 2, 3);
   const LAND_HALF_ARC = 105;
   // One spoke is aimed deliberately between the two spawners, so the wedge each
   // sits in is a different one and the fork is a real fork.
@@ -519,7 +523,12 @@ function attempt(seed, attemptNo) {
     const clearOfCorridor = bs.every((b) => angleDiff(b, corridorBearing) > 14);
     if (w0 !== w1 && clearOfCorridor) spokeBearings = bs;
   }
-  if (!spokeBearings) return null;
+  // A last resort rather than a rejection. What the loop is looking for is a set
+  // of spokes that does not put both spawners in one wedge; the single spoke on
+  // `midSpoke` does that by construction, since midSpoke is the bearing that
+  // bisects them. Failing the whole island over it threw away one map in fifty
+  // for a river that could simply have been one river.
+  if (!spokeBearings) spokeBearings = [midSpoke];
 
   const freshSeeds = [];
   for (const b of spokeBearings) {

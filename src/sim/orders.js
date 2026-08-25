@@ -7,7 +7,7 @@ import { distance, key, parseKey, neighbours, NEIGHBOURS } from './hex.js';
 import {
   tileAt, addLog, nextId, idleHands, idleOfficers, officerById, holdFree, holdCap,
   hasBuilding, isBuildingManned, buildingsOfType, walkableForWork, isClearable, memberById,
-  handsNeededFor, towerManning, isHand, crewHeld, crewName, autoClearOn, setAutoClear,
+  handsNeededFor, towerManning, isHand, crewHeld, crewName, autoClearOn, setAutoClear, devFlag,
 } from './state.js';
 import * as B from './build.js';
 import {
@@ -539,6 +539,7 @@ export const ORDERS = {
     cost: (state) => ({ gold: B.itemBuyCost(state) }),
     check: (state, o) => {
       if (!C.TOWERS[o.tower]) return no('no such fitting');
+      if (C.towerShelved(o.tower) && !devFlag(state, 'allContent')) return no(C.SHELVED_WHY);
       if (C.itemSource(o.tower) !== 'gold') return no(`a ${C.itemName(o.tower)} is crafted, not bought`);
       if (!hasBuilding(state, 'merchant')) return no('needs a manned Peculiar Merchant');
       return holdFree(state) > 0 ? ok : no('the hold is full');
@@ -551,6 +552,7 @@ export const ORDERS = {
     cost: (state) => ({ iron: B.itemCraftCost(state) }),
     check: (state, o) => {
       if (!C.TOWERS[o.tower]) return no('no such fitting');
+      if (C.towerShelved(o.tower) && !devFlag(state, 'allContent')) return no(C.SHELVED_WHY);
       if (C.itemSource(o.tower) !== 'iron') return no(`nobody makes a ${C.itemName(o.tower)} — it is bought`);
       if (!hasBuilding(state, 'workshop')) return no('needs a manned Workshop');
       return holdFree(state) > 0 ? ok : no('the hold is full');
@@ -875,6 +877,29 @@ export function projectedCrew(state, held) {
     return n > 0 && n < clearCapacity(state, o.who) && !!memberById(state, o.who);
   };
 
+  // A sabotage mission is the one order that takes several bodies, so it is
+  // resolved into a team rather than into a name. Same rule the resolve will
+  // use — the nearest idle hands to the staging ground, and the named officer
+  // if one was picked — so the map, the queue and the tile all say the same
+  // four people, and each of them can be drawn walking to it.
+  const teams = new Map();
+  for (const o of state.orders) {
+    if (o.type !== 'scheduleAssault') continue;
+    const sp = state.spawners.find((x) => x.id === o.spawnerId);
+    const at = sp && A.stagingTile(state, sp);
+    if (!at) continue;
+    const team = [];
+    if (o.leader && !taken.has(o.leader)) { taken.add(o.leader); team.push(o.leader); }
+    const want = A.assaultHands(state, o.leader) - (o.leader ? 1 : 0);
+    for (let i = 0; i < want; i++) {
+      const m = pickNearest(state, poolFor('hand'), at, held);
+      if (!m) break;
+      taken.add(m.id);
+      team.push(m.id);
+    }
+    teams.set(o.id, { at, team });
+  }
+
   for (const o of state.orders) {
     if (o.type === 'reassign') continue;            // the same body, a new job
     let at = null;
@@ -894,7 +919,7 @@ export function projectedCrew(state, held) {
     byOrder.set(o.id, m.id);
     if (o.type === 'assignClear') faces.set(m.id, (faces.get(m.id) || 0) + 1);
   }
-  return { byOrder, taken };
+  return { byOrder, taken, teams };
 }
 
 /**
@@ -1318,9 +1343,17 @@ const AUTO_CLEAR_TRIES = 12;
 export function standDown(state, assignmentId) {
   const a = state.crew.assignments.find((x) => x.id === assignmentId);
   if (!a) return no('gone');
-  // The one job that cannot be called off: the team is away over the island
-  // with the powder, and there is nobody here to stand down.
-  if (a.kind === 'assault') return no('away on a sabotage mission');
+  // A body on a mission is not stood down on its own — the mission is called
+  // off, and all four of them walk back. Pulling one out used to be refused
+  // outright ("away over the island with the powder"), which was true while a
+  // mission was a number; now they are four people on a road, and taking one of
+  // them off it would leave a team that could never be all present and a
+  // mission that never resolved.
+  if (a.kind === 'assault') {
+    const mission = state.assaults.find((x) => x.staging && a.target
+      && x.staging.q === a.target.q && x.staging.r === a.target.r);
+    return mission ? A.cancel(state, mission.id) : no('away on a sabotage mission');
+  }
   // Same as revoking the order it came from: taking a body off work nobody
   // asked for is the player saying to stop putting them on it.
   if (a.auto) stopAutoClear(state, a.who, 'the work was called off');

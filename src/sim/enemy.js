@@ -4,6 +4,7 @@ import C from './config.js';
 import { key, distance, neighbours, spiral } from './hex.js';
 import {
   tileAt, isPassable, isCrewGround, shipNetwork, addLog, nextId, draw, drawInt, drawPick,
+  cacheFor,
 } from './state.js';
 
 // ---- pathing ---------------------------------------------------------------
@@ -147,17 +148,63 @@ export function isEntry(state, tile) {
  */
 export function cohortTarget(state, cohort) {
   const net = shipNetwork(state);
+  const usable = chargeable(state);
   let best = null, bestD = Infinity;
+  let fallback = null, fallbackD = Infinity;
   for (const k of net) {
     const t = state.map.tiles.get(k);
     if (!t || t.occupant?.kind === 'base') continue; // the ship is judged on its own
     if (!isPassable(state, t)) continue; // a tower is standing on it; nothing can enter there
     const d = distance(cohort, t);
-    if (d < bestD) { bestD = d; best = t; }
+    // The tile has to be one they can charge *from*, not merely one they can
+    // step onto. A palisade or a gun across the neck of a road leaves open
+    // ground on the far side of it that joins the ship on the map and joins
+    // nothing at all in the resolve — a cohort that made for it walked up to
+    // the wall, made contact, and then had no way in. Entries with a real walk
+    // to the hull are preferred; the nearest tile of any kind is kept as the
+    // fallback so a wholly walled-in ship is still walked up to.
+    if (usable.has(k)) {
+      if (d < bestD) { bestD = d; best = t; }
+    } else if (d < fallbackD) { fallbackD = d; fallback = t; }
   }
+  if (!best) { best = fallback; bestD = fallbackD; }
   const shipD = distance(cohort, state.base);
   if (!best || shipD < bestD) return { q: state.base.q, r: state.base.r, ship: true };
   return { q: best.q, r: best.r, ship: false };
+}
+
+/**
+ * Every tile of your open ground a swarm could charge to the hull from.
+ *
+ * A flood out of the ship over `assault` passability — the same question
+ * `beginCombat` asks when it builds a group's path, asked once for the whole
+ * map and cached with it. Two rules meet here and they do not agree: the ship's
+ * network is open ground joined to the ship and does not care what is standing
+ * on it, while the resolve will not cross a tile with a gun or a yard on it. The
+ * difference between the two sets is exactly the ground a wall has shut.
+ */
+export function chargeable(state) {
+  const cache = cacheFor(state, 'charge');
+  if (cache.version === state.map.version) return cache.value;
+  const set = new Set();
+  const seeds = (state.island?.footprint ?? [{ q: state.base.q, r: state.base.r }])
+    .map((p) => tileAt(state, p.q, p.r)).filter(Boolean);
+  const queue = [...seeds];
+  for (const t of seeds) set.add(key(t.q, t.r));
+  for (let head = 0; head < queue.length; head++) {
+    const cur = queue[head];
+    for (const n of neighbours(cur.q, cur.r)) {
+      const k = key(n.q, n.r);
+      if (set.has(k)) continue;
+      const t = state.map.tiles.get(k);
+      if (!t || !isCrewGround(state, t) || !isPassable(state, t, 'assault')) continue;
+      set.add(k);
+      queue.push(t);
+    }
+  }
+  cache.version = state.map.version;
+  cache.value = set;
+  return set;
 }
 
 /** Is there a continuous walk over the ship's open ground to a tile beside this spawner? */
@@ -191,9 +238,26 @@ function buildUnits(state, spawner) {
   // a longer queue at the same kill zone, and a gun line that holds the first
   // wave holds the last one too.
   const grown = 1 + C.UNIT_DANGER_SCALE * (spawner.stars - 1) ** C.UNIT_DANGER_EXP;
+  // Mixed through the column rather than sorted into blocks.
+  //
+  // The list is the order they come on, so building it as "every grub, then
+  // every shell" sent the wave in as two waves: the fast half arrived, was
+  // fought and died, and the armoured half turned up afterwards against a gun
+  // line that had already spent its shots on the wrong problem. Neither half
+  // was the wave the player was supposed to meet — a cohort is a rate-of-fire
+  // problem *and* a penetration problem at the same time, and it can only be
+  // that if both are standing in the same rank.
+  //
+  // Spread by largest remainder, which is even at any share: 70/30 lays down
+  // grub grub shell grub grub grub shell..., and 50/50 alternates. No RNG, so
+  // the composition of a cohort is still a property of its stars alone.
   const units = [];
+  const want = { grub: grubs, shell: n - grubs };
+  const laid = { grub: 0, shell: 0 };
   for (let i = 0; i < n; i++) {
-    const type = i < grubs ? 'grub' : 'shell';
+    const owed = (kind) => (want[kind] ? (want[kind] * (i + 1)) / n - laid[kind] : -Infinity);
+    const type = owed('grub') >= owed('shell') ? 'grub' : 'shell';
+    laid[type]++;
     units.push({ type, elite: false, role: null, grown });
   }
   if (spawner.eliteNext && units.length) {

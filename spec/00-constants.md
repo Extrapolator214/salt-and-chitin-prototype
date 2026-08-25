@@ -14,7 +14,7 @@ exist to satisfy an acceptance test in `06-acceptance.md` and are expected to mo
 | symbol | meaning |
 |---|---|
 | **tile** | one hex |
-| **turn** | one strategic turn; 300 per run |
+| **turn** | one strategic turn; 99 per run |
 | **second** | real-time only, inside a resolve |
 | **wood, stone** | build currency |
 | **iron, gold** | item currency |
@@ -25,34 +25,69 @@ All build costs are stated in the same integer units.
 
 ---
 
+## 1b · What this build switches off
+
+Six yards — Forge, Trading Dock, Tinker's Shed, Hospital, Excavation Camp,
+Bunkhouse — and six of the eight gun kinds are **shelved**: the tables, the
+rules and the art are all still here, and everything that offers one says
+*unavailable in this version* instead. What is live is the Swivel Gun Post and
+the Parrot Swarm Aviary, and the yards that supply and support them: Workshop,
+Peculiar Merchant, Warehouse, Powder Store, Sappers' Camp, Palisade.
+
+It is a balance decision, not a design one. A pass over the numbers is a
+conversation about a small number of moving parts, and one gun line with one
+house behind each shelf is the smallest version of this game that still has all
+of its decisions in it. `allContent` in the dev flags turns the whole shelf back
+on; the acceptance suite runs with it on, because the rules are still rules.
+
+---
+
 ## 2 · Run frame
+
+**A session is an hour at the table.** A won run took 120 turns of a 300-turn
+frame and about ninety minutes, so the whole clock is cut to a third: three acts
+of 33 turns, escalation every 11, and an island a third of the width to walk
+across. The shape of the run is unchanged — same three acts, same star curve,
+same road out — it is played at three times the pace. Every number in this
+document that is a turn or a tile moved with it; the ones that are a *price* did
+not, and §3's yields went up instead.
 
 | constant | value |
 |---|---|
-| `TURNS_PER_RUN` | 300 |
-| `TURNS_PER_ACT` | 100 |
+| `TURNS_PER_RUN` | 99 |
+| `TURNS_PER_ACT` | 33 |
 | `ACTS` | 3 |
-| `MAP_RADIUS` | 50 |
-| `MAP_TILES` | 7776 |
-| `SPAWNER_RING` | 44 |
+| `ISLAND_RADIUS` | 13 — was 36 |
+| `MAP_RADIUS` | 20 |
+| `MAP_TILES` | ~1250, of which ~495 are land |
+| `SPAWNER_RING` | 15 |
 | `BASE_FOOTPRINT` | 7 tiles (centre + 6 neighbours) |
-| `ARMADA_TURN` | 300 — run ends, loss if any spawner still stands |
+| `ARMADA_TURN` | 99 — run ends, loss if any spawner still stands |
 
 ---
 
 ## 3 · Terrain
 
-Yields below are the spec's. The build pays three times each, because a tile is
-three turns of one worker's labour rather than one — see `TURNS_PER_TILE`. Two
-terrains are not simply tripled, and both are noted in the table.
+Yields below are the spec's. The build pays **nine** times each: three because a
+tile is three turns of one worker's labour rather than one, and three again
+because the run is a third as long — the crew have 99 turns to earn what they
+used to earn in 300, out of an island a ninth of the area. Stone and iron are
+nine times the spec's — a boulder is 45 and a seam 45 — and **wood is half of
+that again**, at 14 a forest tile: wood is the resource an island of this size
+has most of, and the clock's multiplier gave the crew more of it than the shelf
+knew what to do with. Every *price* in this document is
+unchanged, which is the whole of the rebalance: same shelf, same bills, a third
+of the clock to pay them out of.
+
+Two terrains are not simply multiplied, and both are noted in the table.
 
 | terrain | clearable | yield | buildable | passable | advance mult | targetable while virgin | notes |
 |---|---|---|---|---|---:|---|---|
-| `forest` | yes | 3 wood | yes | yes | 3.0 | **no** | build: 9 wood, 3 turns |
-| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **10 wood**, 3 turns — 10% more than forest |
-| `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: 3 wood, **1 turn** — a third of the wood for a third of the work |
-| `stone` | yes | 5 stone | yes | **no until cleared** | — | — | boulders span 3–5 tiles |
-| `iron` | yes | **15 iron** | yes | **no until cleared** | — | — | not in the spec's enum — a seam worked like a boulder, 2% of the mix. The only iron that is not smelted |
+| `forest` | yes | 3 wood | yes | yes | 3.0 | **no** | build: **14 wood**, 3 turns |
+| `canopy` | yes | 3 wood | yes | yes | 3.0 | **no** | blocks line of sight **over** it; build: **15 wood, 4 turns** — a tenth more wood than forest for a third more work, so it is the one ground that pays worse by the turn than what is beside it |
+| `scrub` | yes | 1 wood | yes | yes | 1.5 | yes | build: **5 wood**, **1 turn** — a third of forest's wood for a third of the work |
+| `stone` | yes | 5 stone | yes | **no until cleared** | — | — | build: **45 stone**; boulders span 3–5 tiles |
+| `iron` | yes | **45 iron** | yes | **no until cleared** | — | — | not in the spec's enum — a seam worked like a boulder, 2% of the mix. The only iron that is not smelted |
 | `road` | already clear | 0 | yes | yes | 1.0 | yes | what every cleared tile becomes |
 | `sand` | **no** | 0 | **no** | yes | 2.0 | yes | |
 | `meadow` | **no** | 0 | **yes, uncut** | yes | 1.5 | yes | open grass — crew walk it uncut, and a swarm in contact crosses it. The only ground built on without clearing first, and it never becomes road |
@@ -98,7 +133,7 @@ Build constants; the spec's corridor and apron are gone (see README).
 
 | constant | value |
 |---|---|
-| `HANDS_START` | 10 |
+| `HANDS_START` | **2** — plus the four officers. The crew is grown, not landed |
 | `HANDS_CAP` | 40 |
 | `TILES_PER_HAND_PER_TURN` | 1 |
 | `LABOUR_RESERVE_FLOOR` | 0.20 — advisory readout, not enforced |
@@ -109,9 +144,9 @@ Build constants; the spec's corridor and apron are gone (see README).
 
 | constant | value |
 |---|---|
-| `FLARE_COST_WOOD` | 250 — the build runs **225** |
+| `FLARE_COST_WOOD` | 250 — the build runs **120** |
 | `FLARE_COST_IRON` | 120 — the build runs **30**; see the README on why |
-| `FLARE_HANDS` | 5 |
+| `FLARE_HANDS` | **2** |
 | `FLARE_DELAY_TURNS` | 2 (1 with a Powder Store) |
 | `FLARE_GATE` | act I: 1 · act II: 2 · act III: 3 (cumulative max 6) |
 
@@ -144,8 +179,8 @@ Loss condition: `hull <= 0`.
 | `TIER_BASE` | 2.5 |
 | power by tier | 1 · 2.5 · 6.25 · 15.63 · 39.06 |
 | `EVOLVED_MULT` | 2.5 → evolved tier 5 = 97.66 |
-| manning by tier | t1–3: 1 hand · t4: 2 · t5: 2 · evolved: 3 |
-| footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below |
+| manning by tier | **1 hand at every tier · evolved: 2**. The spec's t4–5: 2 / evolved: 3 was written for a crew of ten that grew to forty; a company of three that grows a boat at a time cannot put two hands behind each of six guns and still cut ground |
+| footprint | **by tower, not by tier** — 1 to 3 tiles, set in the table below. Every kind this build offers lost a tile when the island came down: nothing stands on more than 3 |
 | `TOWER_BUILD_COST` | 30 wood + 20 stone, plus one fitting of its kind from the hold, any tier |
 | `DISASSEMBLE_REFUND` | 80% of build cost, plus the fitted item returns to inventory (and one being merged in) |
 | `TOWER_MERGE_TURNS` | 3 — a matching fitting merged into the gun, which fires throughout |
@@ -295,7 +330,7 @@ building that wants two takes two, and the third order is refused.
 | Sappers' Camp | 3 | 6 | assault teams can be raised |
 | Hospital | 2 | 3 | assault downtime 3 turns → 1 |
 | Powder Store | 2 | 3 | flare cost −25%, lands in 1 turn · **75 wood + 53 stone**, a quarter under the flat price |
-| Excavation Camp | 3 | 4 | works one treasure cache; 100 gold over 10 turns |
+| Excavation Camp | 3 | 4 | works one treasure cache; 50 gold over 10 turns — shelved in this build |
 | Bunkhouse | 2 | 3 | buildings within radius 3 cost 1 hand |
 | Palisade | — | 1 | the enemy will not cross it; no crew · **30 wood + 20 stone**, the same as a tower's emplacement |
 
@@ -337,7 +372,7 @@ they stand.
 | `SUCCESS_CAPTAIN` | 0.90 — led by the Sapper Captain, whose trade it is |
 | `SUCCESS_NAMED` | 0.65 — led by any other unique lieutenant |
 | `SUCCESS_GENERIC` | 0.40 — led by nobody, or by a pirate off the island |
-| `MARCH_TURNS` | 10 |
+| `MARCH_TURNS` | 10 — **gone.** A mission is a walk now: the team gathers on open ground `STAGING_DISTANCE` (2) tiles from the spawner and goes in `STRIKE_TURNS` (1) later, so its length is the length of your road |
 | `DOWNTIME_TURNS` | 3 (1 with a Hospital) |
 | `EXCLUSION_RADIUS` | 7 tiles — no tower may be built within this of a spawner |
 
@@ -363,7 +398,8 @@ cohort advancing on that same turn. Its stars transfer to the surviving spawners
 
 | constant | value |
 |---|---|
-| `ESCALATION_TURNS` | **25** — one random living spawner below its cap gains a star. The spec says 50; the build runs 25, which is 12 firings over a run against the 16 stars the two caps hold, so both can never fill |
+| `ESCALATION_TURNS` | **11** — one random living spawner below its cap gains a star. The spec says 50; the build ran 25 on the 300-turn clock and runs 11 on the 99-turn one, which is 9 firings over a run |
+| `ACT_ESCALATION` | **2** — and the turn an act opens, two more stars land on top of the clock's. An act arrives as a step rather than as more of the same |
 | `ACCUMULATE_TURNS` | 6 |
 | `ADVANCE_TILES_PER_TURN` | 6, divided by the mean advance multiplier of the tiles crossed |
 | `UNITS_PER_STAR` | 8 |
@@ -379,10 +415,27 @@ averages the 70/30 below.
 
 Island 1 fields the **Shells** family and the **column** baseline only.
 
+A cohort's two kinds are **mixed through the column**, not sorted into blocks:
+the list is the order they come on, so building it as every grub and then every
+shell sent the wave in as two waves — the fast half fought and dead before the
+armoured half arrived. Spread by largest remainder, so the composition is still
+a property of the spawner's stars and nothing is rolled for.
+
 | unit | share | HP | armour | road speed | hull damage on arrival |
 |---|---:|---:|---:|---:|---:|
-| Grub *(the column)* | 70% | 10 | 0 | 1.2 tiles/s | 4 |
-| Shell | 30% | 30 | 3 flat per hit | 0.6 tiles/s | 9 |
+| Grub *(the column)* | 70% | 10 | 0 | 0.4 tiles/s | 4 |
+| Shell | 30% | 30 | 3 flat per hit | **0.32 tiles/s** | 9 |
+
+Speeds are about a third of the 1.2 / 0.6 written here, and for the same reason
+the island is a third of the width. They are also **closer together** than the
+spec's 2:1 — a Shell walks at 80% of a Grub, not 50%. What separates the two
+kinds is armour and hull damage, not pace: at half speed a mixed cohort sorted
+itself back into two waves whatever order it set off in, and a gun line only
+ever met one problem at a time. `ELITE_SPEED_MULT` moved with them, 0.5 → 0.8. What a gun is worth is the time its arc holds a
+unit, and that time is the walk divided by the speed — cut the walk to a third
+and leave the speed alone and every gun on the island loses two thirds of its
+shots. A resolve therefore takes about as many seconds as it always did; what
+got shorter is the number of turns in a run, not the length of a fight.
 
 | modifier | rule |
 |---|---|
@@ -399,8 +452,8 @@ healing.
 
 | feature | count | effect |
 |---|---:|---|
-| treasure cache | 12 | 100 gold, worked by an Excavation Camp over 10 turns |
-| freshwater spring | 1 | **3 more hands, ashore at the water**, once and for good. It was +3 to `HANDS_CAP` while a body stood on it — a rule from when hands were a number rather than named people, and one that asked a man to stand on a spring for the rest of the run to be allowed three more of him |
+| treasure cache | 12 | **50 gold**, dug by one hand in a turn. The spec gives it to an Excavation Camp over 10 turns; the camp is shelved and the hand does it |
+| freshwater spring | 1 | **2 more hands, ashore at the water**, once and for good. It was +3 to `HANDS_CAP` while a body stood on it — a rule from when hands were a number rather than named people, and one that asked a man to stand on a spring for the rest of the run to be allowed three more of him |
 | officer site | 1 | at ~0.5r, visible from turn 1; reaching it with a hand recruits a 4th officer |
 | shipwreck | 3 | 60 wood, 30 iron, 10 gold on first clear, then a buildable platform |
 
@@ -433,7 +486,10 @@ three.
 | constant | value |
 |---|---|
 | `TICK_HZ` | 30 |
-| `RESOLVE_CAP_SECONDS` | 60 — after this the remainder auto-resolves |
+| `RESOLVE_CAP_SECONDS` | 600 — after this the remainder auto-resolves. A backstop and nothing else: a wave that runs out of clock is a wave the player never had to fight, and at 60 (with unit speed cut to a third) a column crossing the island did exactly that |
+| `CONTACT_ABREAST` | **2** — how many units come onto the path together |
+| `CONTACT_RANK_GAP` | 0.35 tiles between one rank and the next |
+| `CONTACT_JITTER` | 0.25 — random slack on each, so a rank is a crowd rather than a row |
 | `SPEED_OPTIONS` | 1× · 3× · skip |
 
 The player gives no input during a resolve.
